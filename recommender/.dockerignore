@@ -1,0 +1,5 @@
+data
+jars
+spark-warehouse
+__pycache__
+*.py[cod]

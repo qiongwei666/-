@@ -1,0 +1,10 @@
+pyspark==4.0.5
+# Python 3.13 不再内置 distutils，PySpark 运行 pyspark.ml 需要 setuptools 提供兼容模块
+setuptools==75.8.0
+# 以下版本均提供 Python 3.13 的 Windows 预编译 wheel
+numpy==2.2.6
+scipy==1.15.3
+scikit-learn==1.6.1
+redis==5.2.1
+PyMySQL==1.1.1
+python-dotenv==1.1.0
