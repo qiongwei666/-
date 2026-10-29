@@ -1,12 +1,10 @@
-name: pinxun
-
 services:
   mysql:
     image: mysql:8.0
+    container_name: ecommerce-rec-mysql
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在 .env 中设置 MYSQL_ROOT_PASSWORD}
-      MYSQL_ROOT_HOST: "%"
+      MYSQL_ROOT_PASSWORD: "276367"
       MYSQL_DATABASE: ecommerce
       TZ: Asia/Shanghai
     command:
@@ -18,14 +16,14 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p276367"]
       interval: 5s
       timeout: 5s
-      retries: 30
-      start_period: 30s
+      retries: 20
 
   redis:
     image: redis:7-alpine
+    container_name: ecommerce-rec-redis
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     ports:
@@ -39,56 +37,31 @@ services:
       retries: 20
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+    container_name: ecommerce-rec-backend
     restart: unless-stopped
     environment:
-      APP_ENV: production
-      DEBUG: "false"
-      SECRET_KEY: ${SECRET_KEY:?请在 .env 中设置 SECRET_KEY}
-      DATABASE_URL: mysql+pymysql://root:${MYSQL_ROOT_PASSWORD}@mysql:3306/ecommerce?charset=utf8mb4
-      REDIS_URL: redis://redis:6379/0
-      TZ: Asia/Shanghai
+      DATABASE_URL: "mysql+pymysql://root:276367@mysql:3306/ecommerce?charset=utf8mb4"
+      REDIS_URL: "redis://redis:6379/0"
     depends_on:
       mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
-    healthcheck:
-      test:
-        - CMD
-        - python
-        - -c
-        - "import json,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/health')); assert d['code']==0 and d['data']['database']"
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 20s
+    ports:
+      - "127.0.0.1:8000:8000"
 
-  web:
-    build: ./frontend
+  frontend:
+    build:
+      context: ./frontend
+    container_name: ecommerce-rec-frontend
     restart: unless-stopped
+    depends_on:
+      - backend
     ports:
       - "80:80"
-    depends_on:
-      backend:
-        condition: service_healthy
-
-  recommender:
-    build: ./recommender
-    profiles: ["train"]
-    environment:
-      DATABASE_URL: mysql+pymysql://root:${MYSQL_ROOT_PASSWORD}@mysql:3306/ecommerce?charset=utf8mb4
-      REDIS_URL: redis://redis:6379/0
-      TZ: Asia/Shanghai
-    depends_on:
-      mysql:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - recommender_jars:/app/jars
 
 volumes:
   mysql_data:
   redis_data:
-  recommender_jars:
