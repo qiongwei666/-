@@ -24,171 +24,119 @@ from app.utils.security import hash_password
 
 RANDOM_SEED = 20241001
 TARGET_USERS = 300
-# 每个一级分类 60 个商品：10 个名词词 × 6 种款式
-PRODUCTS_PER_ROOT = 60
 BEHAVIOR_RANGE = (60, 90)
-PRODUCT_VARIANTS = ("经典款", "升级款", "臻享款", "轻享款", "旗舰款", "限定款")
+# 每个商品名词最多两张图，对应两个款式；单图名词只生成一件商品
+PRODUCT_VARIANTS = ("经典款", "升级款")
 
-# 一级分类 -> (子分类, 商品名词)
-CATEGORY_BLUEPRINTS: list[tuple[str, tuple[str, str], list[str]]] = [
+# 一级分类 -> [(子分类, 商品名词), ...]
+# 每个名词只归属一个精确子分类，避免商品混挂
+CATEGORY_BLUEPRINTS: list[tuple[str, list[tuple[str, list[str]]]]] = [
     (
         "手机数码",
-        ("智能手机", "智能穿戴"),
         [
-            "5G 智能手机",
-            "轻薄折叠屏手机",
-            "降噪蓝牙耳机",
-            "智能运动手表",
-            "高清平板电脑",
-            "便携充电宝",
-            "无线充电器",
-            "智能音箱",
-            "口袋运动相机",
-            "防摔手机壳",
+            ("手机", ["5G 智能手机", "轻薄折叠屏手机"]),
+            ("耳机音箱", ["降噪蓝牙耳机", "智能音箱"]),
+            ("智能穿戴", ["智能运动手表"]),
+            ("平板与影像", ["高清平板电脑", "口袋运动相机"]),
+            ("数码配件", ["便携充电宝", "无线充电器", "防摔手机壳"]),
         ],
     ),
     (
         "电脑办公",
-        ("笔记本电脑", "电脑外设"),
         [
-            "轻薄笔记本电脑",
-            "高性能游戏本",
-            "商务办公台式机",
-            "27 英寸显示器",
-            "机械键盘",
-            "无线鼠标",
-            "激光打印机",
-            "移动固态硬盘",
-            "视频会议摄像头",
-            "人体工学椅",
+            ("笔记本", ["轻薄笔记本电脑", "高性能游戏本"]),
+            ("台式与显示", ["商务办公台式机", "27 英寸显示器"]),
+            ("键鼠外设", ["机械键盘", "无线鼠标"]),
+            ("打印与存储", ["激光打印机", "移动固态硬盘"]),
+            ("办公配件", ["视频会议摄像头", "人体工学椅"]),
         ],
     ),
     (
         "家用电器",
-        ("厨房电器", "生活电器"),
         [
-            "多功能电饭煲",
-            "空气炸锅",
-            "破壁料理机",
-            "意式咖啡机",
-            "扫地机器人",
-            "无线吸尘器",
-            "智能空气净化器",
-            "变频空调",
-            "迷你洗衣机",
-            "电热水壶",
+            ("厨房烹饪", ["多功能电饭煲", "空气炸锅", "破壁料理机", "意式咖啡机"]),
+            ("清洁电器", ["扫地机器人", "无线吸尘器"]),
+            ("环境电器", ["智能空气净化器"]),
+            ("大家电", ["变频空调", "迷你洗衣机"]),
+            ("生活小家电", ["电热水壶"]),
         ],
     ),
     (
         "服饰鞋包",
-        ("男装女装", "鞋靴箱包"),
         [
-            "纯棉基础 T 恤",
-            "轻薄羽绒服",
-            "休闲直筒牛仔裤",
-            "法式连衣裙",
-            "防风冲锋衣",
-            "轻便跑步鞋",
-            "真皮通勤皮鞋",
-            "大容量双肩包",
-            "复古斜挎包",
-            "羊绒围巾",
+            ("上装", ["纯棉基础 T 恤"]),
+            ("外套", ["轻薄羽绒服", "防风冲锋衣"]),
+            ("裤装裙装", ["休闲直筒牛仔裤", "法式连衣裙"]),
+            ("鞋靴", ["轻便跑步鞋", "真皮通勤皮鞋"]),
+            ("箱包配饰", ["大容量双肩包", "复古斜挎包", "羊绒围巾"]),
         ],
     ),
     (
         "美妆个护",
-        ("护肤彩妆", "洗护香氛"),
         [
-            "氨基酸洁面乳",
-            "烟酰胺精华液",
-            "保湿面霜",
-            "持妆粉底液",
-            "丝绒口红",
-            "防晒喷雾",
-            "修护洗发水",
-            "木质调香水",
-            "电动牙刷",
-            "蒸汽眼罩",
+            ("护肤防晒", ["氨基酸洁面乳", "烟酰胺精华液", "保湿面霜", "防晒喷雾"]),
+            ("彩妆", ["持妆粉底液", "丝绒口红"]),
+            ("洗护发", ["修护洗发水"]),
+            ("香氛", ["木质调香水"]),
+            ("口腔眼护", ["电动牙刷", "蒸汽眼罩"]),
         ],
     ),
     (
         "食品生鲜",
-        ("休闲零食", "粮油生鲜"),
         [
-            "每日坚果礼盒",
-            "手工曲奇饼干",
-            "原切牛肉干",
-            "黑巧克力",
-            "五常大米",
-            "初榨橄榄油",
-            "冷冻虾仁",
-            "云南小粒咖啡",
-            "高山绿茶",
-            "有机纯牛奶",
+            ("休闲零食", ["每日坚果礼盒", "手工曲奇饼干", "原切牛肉干", "黑巧克力"]),
+            ("冲调饮品", ["云南小粒咖啡", "高山绿茶"]),
+            ("米面粮油", ["五常大米", "初榨橄榄油"]),
+            ("生鲜水产", ["冷冻虾仁"]),
+            ("乳品", ["有机纯牛奶"]),
         ],
     ),
     (
         "运动户外",
-        ("运动装备", "户外出行"),
         [
-            "专业瑜伽垫",
-            "可调节哑铃",
-            "碳纤维羽毛球拍",
-            "竞速跳绳",
-            "露营帐篷",
-            "户外折叠椅",
-            "登山背包",
-            "保温运动水壶",
-            "骑行头盔",
-            "防滑徒步鞋",
+            ("健身器材", ["专业瑜伽垫", "可调节哑铃", "竞速跳绳"]),
+            ("球类装备", ["碳纤维羽毛球拍"]),
+            ("露营装备", ["露营帐篷", "户外折叠椅"]),
+            ("户外出行", ["登山背包", "保温运动水壶", "防滑徒步鞋"]),
+            ("骑行装备", ["骑行头盔"]),
         ],
     ),
     (
         "图书文娱",
-        ("图书音像", "文具乐器"),
         [
-            "数据分析入门图书",
-            "人工智能通识读本",
-            "经济学经典套装",
-            "儿童绘本套装",
-            "钢笔礼盒",
-            "手账本套装",
-            "入门尤克里里",
-            "便携蓝牙音箱",
-            "桌面护眼台灯",
-            "城市建筑拼图",
+            (
+                "图书",
+                [
+                    "数据分析入门图书",
+                    "人工智能通识读本",
+                    "经济学经典套装",
+                    "儿童绘本套装",
+                ],
+            ),
+            ("文具", ["钢笔礼盒", "手账本套装"]),
+            ("乐器", ["入门尤克里里"]),
+            ("音频设备", ["便携蓝牙音箱"]),
+            ("文创周边", ["桌面护眼台灯", "城市建筑拼图"]),
         ],
     ),
     (
         "母婴玩具",
-        ("母婴用品", "玩具模型"),
         [
-            "婴儿纸尿裤",
-            "婴幼儿奶粉",
-            "宝宝辅食机",
-            "儿童安全座椅",
-            "益智积木套装",
-            "遥控越野车",
-            "柔软毛绒玩偶",
-            "科学实验套装",
-            "儿童平衡车",
-            "亲子桌游",
+            ("喂养护理", ["婴儿纸尿裤", "婴幼儿奶粉", "宝宝辅食机"]),
+            ("出行安全", ["儿童安全座椅", "儿童平衡车"]),
+            ("积木模型", ["益智积木套装", "遥控越野车"]),
+            ("益智玩具", ["科学实验套装", "柔软毛绒玩偶"]),
+            ("亲子互动", ["亲子桌游"]),
         ],
     ),
     (
         "家居家装",
-        ("家具软装", "家装建材"),
         [
-            "北欧布艺沙发",
-            "实木餐桌",
-            "天然乳胶床垫",
-            "遮光窗帘",
-            "羊毛地毯",
-            "LED 吸顶灯",
-            "智能门锁",
-            "恒温花洒",
-            "收纳边柜",
-            "香薰蜡烛",
+            ("客厅家具", ["北欧布艺沙发"]),
+            ("餐厅家具", ["实木餐桌"]),
+            ("卧室软装", ["天然乳胶床垫", "遮光窗帘", "羊毛地毯"]),
+            ("灯饰香氛", ["LED 吸顶灯", "香薰蜡烛"]),
+            ("卫浴收纳", ["智能门锁", "恒温花洒", "收纳边柜"]),
         ],
     ),
 ]
@@ -274,42 +222,50 @@ BRAND_POOL = [
 def build_products(
     rng: random.Random, roots: list[Category], children: dict[int, list[Category]]
 ) -> list[Product]:
-    """为每个一级分类生成 60 个商品，并轮换挂到两个子分类下。"""
+    """按精确子分类生成商品。
+
+    每个名词的每张图片只生成一件商品，图片全局不重复；
+    名词有一张图就生成经典款，有两张图再生成升级款。
+    """
     products: list[Product] = []
     now = datetime.now()
+    serial = 0
     for root_index, root in enumerate(roots):
-        _, _, nouns = CATEGORY_BLUEPRINTS[root_index]
+        _, sections = CATEGORY_BLUEPRINTS[root_index]
         low, high, features, scene = CATEGORY_META[root.name]
-        child_list = children[root.id]
+        child_by_name = {child.name: child for child in children[root.id]}
 
-        for index in range(PRODUCTS_PER_ROOT):
-            noun = nouns[index % len(nouns)]
-            round_no = index // len(nouns) + 1
-            brand = BRAND_POOL[(root_index * 3 + index) % len(BRAND_POOL)]
-            variant = (
-                PRODUCT_VARIANTS[round_no - 1]
-                if round_no <= len(PRODUCT_VARIANTS)
-                else f"{round_no} 代"
-            )
-            feature_a = features[index % len(features)]
-            feature_b = features[(index + 2) % len(features)]
-            price = Decimal(str(round(rng.uniform(low, high), 2)))
-            image_urls = IMAGES[noun]
-            product = Product(
-                name=f"{brand} {noun} {variant}",
-                description=(
-                    f"{brand}{noun}{variant}，主打{feature_a}与{feature_b}，"
-                    f"面向{scene}。{root.name}类目优选商品，支持七天无理由退换，"
-                    f"提供一年质保与快速发货服务。"
-                ),
-                price=price,
-                stock=rng.randint(80, 500),
-                category_id=child_list[index % len(child_list)].id,
-                sales=0,
-                image_url=image_urls[(round_no - 1) % len(image_urls)],
-                created_at=now - timedelta(days=rng.randint(10, 120)),
-            )
-            products.append(product)
+        for sub_name, nouns in sections:
+            child = child_by_name[sub_name]
+            for noun in nouns:
+                base_price = rng.uniform(low, high)
+                for variant_index, image_url in enumerate(IMAGES[noun]):
+                    brand = BRAND_POOL[(root_index * 3 + serial) % len(BRAND_POOL)]
+                    variant = PRODUCT_VARIANTS[
+                        variant_index % len(PRODUCT_VARIANTS)
+                    ]
+                    feature_a = features[serial % len(features)]
+                    feature_b = features[(serial + 2) % len(features)]
+                    price = Decimal(
+                        str(round(base_price * (1 + 0.12 * variant_index), 2))
+                    )
+                    products.append(
+                        Product(
+                            name=f"{brand} {noun} {variant}",
+                            description=(
+                                f"{brand}{noun}{variant}，主打{feature_a}与{feature_b}，"
+                                f"面向{scene}。{sub_name}类目优选商品，支持七天无理由退换，"
+                                f"提供一年质保与快速发货服务。"
+                            ),
+                            price=price,
+                            stock=rng.randint(80, 500),
+                            category_id=child.id,
+                            sales=0,
+                            image_url=image_url,
+                            created_at=now - timedelta(days=rng.randint(10, 120)),
+                        )
+                    )
+                    serial += 1
     return products
 
 
@@ -353,14 +309,14 @@ def seed() -> None:
         # ---------- 分类 ----------
         roots: list[Category] = []
         subcategories: dict[int, list[Category]] = {}
-        for root_name, sub_names, _ in CATEGORY_BLUEPRINTS:
+        for root_name, _ in CATEGORY_BLUEPRINTS:
             roots.append(Category(name=root_name))
         db.add_all(roots)
         db.flush()
 
         for index, root in enumerate(roots):
             subcategories[root.id] = []
-            for sub_name in CATEGORY_BLUEPRINTS[index][1]:
+            for sub_name, _ in CATEGORY_BLUEPRINTS[index][1]:
                 child = Category(name=sub_name, parent_id=root.id)
                 db.add(child)
                 subcategories[root.id].append(child)
@@ -376,20 +332,23 @@ def seed() -> None:
         db.commit()
         for product in products:
             db.refresh(product)
-        product_by_id = {product.id: product for product in products}
-        products_by_root: dict[int, list[Product]] = {}
-        product_root: dict[int, int] = {}
-        for index, root in enumerate(roots):
-            start = index * PRODUCTS_PER_ROOT
-            batch = products[start : start + PRODUCTS_PER_ROOT]
-            products_by_root[root.id] = batch
-            for product in batch:
-                product_root[product.id] = root.id
-        print(f"[seed] 商品：{len(products)} 个")
+        child_to_root = {
+            child.id: root.id
+            for root in roots
+            for child in subcategories[root.id]
+        }
+        products_by_root: dict[int, list[Product]] = {
+            root.id: [] for root in roots
+        }
+        for product in products:
+            products_by_root[child_to_root[product.category_id]].append(product)
+        print(f"[seed] 商品：{len(products)} 个（图片不重复）")
 
         # ---------- 用户 ----------
         password_hash = hash_password("123456")
-        usernames = ["demo"] + [f"user{i:03d}" for i in range(1, TARGET_USERS)]
+        usernames = ["admin", "demo"] + [
+            f"user{i:03d}" for i in range(1, TARGET_USERS - 1)
+        ]
         users: list[User] = []
         for username in usernames:
             users.append(
@@ -397,6 +356,7 @@ def seed() -> None:
                     username=username,
                     password_hash=password_hash,
                     email=f"{username}@example.com",
+                    role="admin" if username == "admin" else "user",
                     created_at=datetime.now() - timedelta(days=rng.randint(25, 150)),
                 )
             )
@@ -404,7 +364,7 @@ def seed() -> None:
         db.commit()
         for user in users:
             db.refresh(user)
-        print(f"[seed] 用户：{len(users)} 个（统一密码 123456）")
+        print(f"[seed] 用户：{len(users)} 个（统一密码 123456，含 1 个管理员 admin）")
 
         # ---------- 行为数据 ----------
         root_ids = [root.id for root in roots]
@@ -414,9 +374,9 @@ def seed() -> None:
         type_weights = [0.68, 0.18, 0.08, 0.06]
         now = datetime.now()
 
-        for user_index, user in enumerate(users):
+        for user in users:
             # demo 用户偏好手机数码 + 电脑办公，便于答辩展示
-            if user_index == 0:
+            if user.username == "demo":
                 preferred = root_ids[:2]
             else:
                 pref_count = rng.choice([2, 2, 3])
@@ -463,7 +423,7 @@ def seed() -> None:
         print("[seed] 商品销量已根据行为热度回填")
 
         # ---------- 演示用户订单与购物车 ----------
-        demo_user = users[0]
+        demo_user = next(user for user in users if user.username == "demo")
         demo_products = products_by_root[root_ids[0]] + products_by_root[root_ids[1]]
         db.add(build_order(rng, demo_user, demo_products[:10], 9))
         db.add(build_order(rng, demo_user, demo_products[10:20], 3))
@@ -485,7 +445,7 @@ def seed() -> None:
             f"[seed] 完成：用户 {user_count}，商品 {product_count}，行为 {behavior_count}，"
             f"耗时 {elapsed:.2f}s"
         )
-        print("[seed] 演示账号：demo / 123456")
+        print("[seed] 演示账号：demo / 123456（普通用户）、admin / 123456（管理员）")
     finally:
         db.close()
 

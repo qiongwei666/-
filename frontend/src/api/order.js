@@ -9,3 +9,13 @@ export function createOrder() {
 export function getOrders(config = {}) {
   return request.get('/orders', config)
 }
+
+/** 确认收货 */
+export function confirmReceipt(orderId) {
+  return request.post(`/orders/${orderId}/confirm`)
+}
+
+/** 申请退货 / 换货 */
+export function requestReturn(orderId, data) {
+  return request.post(`/orders/${orderId}/return`, data)
+}

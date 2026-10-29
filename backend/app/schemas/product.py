@@ -30,6 +30,7 @@ class ProductOut(BaseModel):
     category_name: str = ""
     sales: int
     image_url: str
+    status: str
     created_at: datetime
 
 

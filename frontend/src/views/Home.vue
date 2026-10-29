@@ -19,10 +19,6 @@
                   >
                     {{ banner.action }}
                   </el-button>
-                  <span class="hero-link" @click="router.push('/products')">
-                    了解更多
-                    <span class="hero-chevron" aria-hidden="true">›</span>
-                  </span>
                 </div>
               </div>
 
@@ -268,24 +264,6 @@ onMounted(() => {
   flex-wrap: wrap;
 }
 
-.hero-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 17px;
-  color: #06c;
-  cursor: pointer;
-}
-
-.hero-link:hover {
-  text-decoration: underline;
-}
-
-.hero-chevron {
-  font-size: 20px;
-  line-height: 1;
-}
-
 .hero-visual {
   display: flex;
   justify-content: center;
@@ -320,10 +298,6 @@ onMounted(() => {
   color: #a1a1a6;
 }
 
-.hero--dark .hero-link {
-  color: #2997ff;
-}
-
 .hero--blue {
   background: linear-gradient(135deg, #0071e3 0%, #2997ff 100%);
   color: #fff;
@@ -335,10 +309,6 @@ onMounted(() => {
 
 .hero--blue .hero-sub {
   color: rgba(255, 255, 255, 0.88);
-}
-
-.hero--blue .hero-link {
-  color: #fff;
 }
 
 .hero--blue .hero-cta {
@@ -501,10 +471,6 @@ onMounted(() => {
   .hero-actions {
     margin-top: 22px;
     gap: 18px;
-  }
-
-  .hero-link {
-    font-size: 15px;
   }
 
   .category-grid {

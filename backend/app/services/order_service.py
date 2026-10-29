@@ -11,6 +11,7 @@ from app.models.cart import CartItem
 from app.models.order import Order, OrderItem
 from app.models.product import Product
 from app.models.user import User
+from app.schemas.admin import ReturnCreate
 from app.utils.exceptions import BizError
 
 
@@ -42,6 +43,8 @@ def add_to_cart(db: Session, user_id: int, product_id: int, quantity: int) -> Ca
     product = db.get(Product, product_id)
     if product is None:
         raise BizError(404, "商品不存在")
+    if product.status != "on_sale":
+        raise BizError(400, "商品已下架")
     if product.stock <= 0:
         raise BizError(400, "商品暂时无货")
 
@@ -85,6 +88,8 @@ def update_cart_item(
 ) -> CartItem:
     """修改购物车数量并校验库存。"""
     item = get_owned_cart_item(db, user_id, item_id)
+    if item.product.status != "on_sale":
+        raise BizError(400, "商品已下架")
     if quantity > item.product.stock:
         raise BizError(400, f"库存不足，当前最多可购买 {item.product.stock} 件")
     item.quantity = quantity
@@ -119,7 +124,7 @@ def create_order_from_cart(db: Session, user: User) -> Order:
             product = db.scalar(
                 select(Product).where(Product.id == cart.product_id).with_for_update()
             )
-            if product is None:
+            if product is None or product.status != "on_sale":
                 raise BizError(400, "购物车中存在已下架商品")
             if cart.quantity > product.stock:
                 raise BizError(400, f"商品「{product.name}」库存不足")
@@ -176,3 +181,53 @@ def list_orders(db: Session, user_id: int) -> list[Order]:
         .order_by(Order.created_at.desc(), Order.id.desc())
     )
     return list(db.scalars(stmt).unique().all())
+
+
+def _reload_order(db: Session, order_id: int) -> Order:
+    """重新加载订单明细，避免序列化时访问已失效的会话关系。"""
+    order = db.scalar(
+        select(Order)
+        .where(Order.id == order_id)
+        .options(selectinload(Order.items).joinedload(OrderItem.product))
+    )
+    if order is None:  # pragma: no cover
+        raise BizError(500, "订单加载失败")
+    return order
+
+
+def confirm_receipt(db: Session, user_id: int, order_id: int) -> Order:
+    """用户确认收货：已发货 -> 已完成。"""
+    order = db.scalar(
+        select(Order)
+        .where(Order.id == order_id, Order.user_id == user_id)
+        .with_for_update()
+    )
+    if order is None:
+        raise BizError(404, "订单不存在")
+    if order.status != "shipped":
+        raise BizError(400, "只有已发货订单可以确认收货")
+
+    order.status = "completed"
+    db.commit()
+    return _reload_order(db, order_id)
+
+
+def request_return(
+    db: Session, user_id: int, order_id: int, payload: ReturnCreate
+) -> Order:
+    """用户对已发货 / 已完成订单申请退货或换货。"""
+    order = db.scalar(
+        select(Order)
+        .where(Order.id == order_id, Order.user_id == user_id)
+        .with_for_update()
+    )
+    if order is None:
+        raise BizError(404, "订单不存在")
+    if order.status not in ("shipped", "completed"):
+        raise BizError(400, "只有已发货或已完成的订单可以申请退换货")
+
+    order.status = "return_pending"
+    order.return_type = payload.return_type
+    order.return_reason = payload.reason
+    db.commit()
+    return _reload_order(db, order_id)

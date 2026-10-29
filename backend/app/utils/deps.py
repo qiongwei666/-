@@ -37,3 +37,13 @@ def get_current_user(
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+def require_admin(current_user: CurrentUser) -> User:
+    """管理员接口守卫：角色从数据库实时读取。"""
+    if current_user.role != "admin":
+        raise BizError(403, "需要管理员权限")
+    return current_user
+
+
+AdminUser = Annotated[User, Depends(require_admin)]

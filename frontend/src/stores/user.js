@@ -16,6 +16,7 @@ export const useUserStore = defineStore('user', {
 
   getters: {
     isLoggedIn: (state) => Boolean(state.token),
+    isAdmin: (state) => state.user?.role === 'admin',
     displayName: (state) => state.user?.username || state.user?.email || '用户'
   },
 

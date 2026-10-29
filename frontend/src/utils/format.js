@@ -49,7 +49,10 @@ const ORDER_STATUS_MAP = {
   cancelled: { text: '已取消', type: 'info' },
   canceled: { text: '已取消', type: 'info' },
   closed: { text: '已关闭', type: 'info' },
-  refunded: { text: '已退款', type: 'danger' }
+  return_pending: { text: '退换审核中', type: 'warning' },
+  return_rejected: { text: '退换已驳回', type: 'danger' },
+  refunded: { text: '已退款', type: 'danger' },
+  exchanged: { text: '已换货', type: 'primary' }
 }
 
 /** 获取订单状态的展示信息 */

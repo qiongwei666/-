@@ -105,8 +105,13 @@ def _hot_ids_from_cache(limit: int) -> list[int]:
 
 
 def _hot_ids_from_db(db: Session, limit: int) -> list[int]:
-    """数据库兜底热销：按销量倒序。"""
-    stmt = select(Product.id).order_by(Product.sales.desc(), Product.id.asc()).limit(limit)
+    """数据库兜底热销：按销量倒序，仅上架商品。"""
+    stmt = (
+        select(Product.id)
+        .where(Product.status == "on_sale")
+        .order_by(Product.sales.desc(), Product.id.asc())
+        .limit(limit)
+    )
     return list(db.scalars(stmt).all())
 
 
@@ -117,7 +122,7 @@ def _fetch_products(db: Session, ids: list[int]) -> list[Product]:
         return []
     stmt = (
         select(Product)
-        .where(Product.id.in_(unique_ids))
+        .where(Product.id.in_(unique_ids), Product.status == "on_sale")
         .options(joinedload(Product.category))
     )
     products = list(db.scalars(stmt).unique().all())
@@ -268,7 +273,11 @@ def _category_products(
     """同分类热销候选，保证新商品也有兜底。"""
     stmt = (
         select(Product)
-        .where(Product.category_id == category_id, Product.id != product_id)
+        .where(
+            Product.category_id == category_id,
+            Product.id != product_id,
+            Product.status == "on_sale",
+        )
         .options(joinedload(Product.category))
         .order_by(Product.sales.desc(), Product.id.asc())
         .limit(limit)
@@ -315,7 +324,11 @@ def _behavior_candidates(
     if interacted is None:
         interacted = _user_interacted_ids(db, user_id)
 
-    stmt = select(Product).options(joinedload(Product.category))
+    stmt = (
+        select(Product)
+        .where(Product.status == "on_sale")
+        .options(joinedload(Product.category))
+    )
     if interacted:
         stmt = stmt.where(Product.id.notin_(interacted))
     products = list(db.scalars(stmt).unique().all())

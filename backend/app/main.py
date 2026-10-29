@@ -21,7 +21,16 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.config import settings
 from app.database import SessionLocal, init_db
 from app.redis_client import close_redis, is_redis_available
-from app.routers import auth, behavior, cart, category, order, product, recommend
+from app.routers import (
+    admin,
+    auth,
+    behavior,
+    cart,
+    category,
+    order,
+    product,
+    recommend,
+)
 from app.utils.exceptions import BizError
 from app.utils.response import failure, success
 
@@ -181,3 +190,4 @@ app.include_router(cart.router, prefix="/api")
 app.include_router(order.router, prefix="/api")
 app.include_router(behavior.router, prefix="/api")
 app.include_router(recommend.router, prefix="/api")
+app.include_router(admin.router, prefix="/api")

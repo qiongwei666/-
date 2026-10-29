@@ -13,6 +13,14 @@
         <router-link to="/products" class="nav-link" active-class="is-active">
           全部商品
         </router-link>
+        <router-link
+          v-if="userStore.isAdmin"
+          to="/admin/products"
+          class="nav-link"
+          active-class="is-active"
+        >
+          管理后台
+        </router-link>
       </nav>
 
       <div class="header-actions">
@@ -38,6 +46,14 @@
               <el-dropdown-item command="orders">
                 <el-icon><Tickets /></el-icon>
                 <span>我的订单</span>
+              </el-dropdown-item>
+              <el-dropdown-item v-if="userStore.isAdmin" command="admin-products">
+                <el-icon><Goods /></el-icon>
+                <span>商品管理</span>
+              </el-dropdown-item>
+              <el-dropdown-item v-if="userStore.isAdmin" command="admin-orders">
+                <el-icon><Tickets /></el-icon>
+                <span>订单管理</span>
               </el-dropdown-item>
               <el-dropdown-item command="logout" divided>
                 <el-icon><SwitchButton /></el-icon>
@@ -73,6 +89,16 @@ const cartStore = useCartStore()
 function handleCommand(command) {
   if (command === 'orders') {
     router.push('/orders')
+    return
+  }
+
+  if (command === 'admin-products') {
+    router.push('/admin/products')
+    return
+  }
+
+  if (command === 'admin-orders') {
+    router.push('/admin/orders')
     return
   }
 

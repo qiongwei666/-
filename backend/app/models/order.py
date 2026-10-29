@@ -22,6 +22,10 @@ class Order(Base):
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="paid", index=True
     )
+    tracking_no: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    shipped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    return_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    return_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, nullable=False, index=True
     )
@@ -38,6 +42,11 @@ class Order(Base):
     def total_quantity(self) -> int:
         """订单商品总件数。"""
         return sum(item.quantity for item in self.items)
+
+    @property
+    def username(self) -> str:
+        """下单用户名，供后台订单列表展示。"""
+        return self.user.username if self.user else ""
 
 
 class OrderItem(Base):

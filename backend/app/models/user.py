@@ -21,6 +21,9 @@ class User(Base):
     email: Mapped[str] = mapped_column(
         String(120), unique=True, nullable=False, index=True
     )
+    role: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="user", index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, nullable=False
     )

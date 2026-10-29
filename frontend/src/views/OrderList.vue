@@ -47,6 +47,9 @@
               <el-icon><Clock /></el-icon>
               {{ formatDateTime(order.created_at) }}
             </span>
+            <span v-if="order.tracking_no" class="order-tracking">
+              快递单号：{{ order.tracking_no }}
+            </span>
           </div>
           <el-tag :type="getOrderStatus(order.status).type" effect="light" round>
             {{ getOrderStatus(order.status).text }}
@@ -99,7 +102,31 @@
           </div>
         </div>
 
+        <div v-if="order.return_reason" class="order-return">
+          退换类型：{{ order.return_type === 'refund' ? '退货退款' : '换货' }}；
+          申请原因：{{ order.return_reason }}
+        </div>
+
         <div class="order-foot">
+          <div class="order-actions">
+            <el-button
+              v-if="order.status === 'shipped'"
+              size="small"
+              type="primary"
+              plain
+              :loading="confirmingId === order.id"
+              @click="handleConfirm(order)"
+            >
+              确认收货
+            </el-button>
+            <el-button
+              v-if="order.status === 'shipped' || order.status === 'completed'"
+              size="small"
+              @click="openReturn(order)"
+            >
+              申请退换货
+            </el-button>
+          </div>
           <span class="order-count">共 {{ totalCount(order) }} 件商品</span>
           <span class="order-total">
             合计：<strong>¥{{ formatPrice(order.total_amount) }}</strong>
@@ -107,13 +134,42 @@
         </div>
       </el-card>
     </div>
+
+    <el-dialog v-model="returnVisible" title="申请退货 / 换货" width="460px">
+      <p class="return-tip">订单号 #{{ returnOrder?.id }}，提交后由管理员审批。</p>
+      <el-form label-position="top">
+        <el-form-item label="申请类型">
+          <el-radio-group v-model="returnForm.return_type">
+            <el-radio value="refund">退货退款</el-radio>
+            <el-radio value="exchange">换货</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="申请原因">
+          <el-input
+            v-model="returnForm.reason"
+            type="textarea"
+            :rows="3"
+            maxlength="255"
+            show-word-limit
+            placeholder="请说明退换货原因"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="returnVisible = false">取消</el-button>
+        <el-button type="primary" :loading="submittingReturn" @click="submitReturn">
+          提交申请
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { getOrders } from '@/api/order'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { confirmReceipt, getOrders, requestReturn } from '@/api/order'
 import { formatDateTime, formatPrice, getOrderStatus } from '@/utils/format'
 import { PLACEHOLDER_IMAGE, handleImageError } from '@/utils/image'
 
@@ -122,6 +178,15 @@ const router = useRouter()
 const orders = ref([])
 const loading = ref(true)
 const error = ref(false)
+const confirmingId = ref(null)
+
+const returnVisible = ref(false)
+const returnOrder = ref(null)
+const submittingReturn = ref(false)
+const returnForm = reactive({
+  return_type: 'refund',
+  reason: ''
+})
 
 /** 统计订单内的商品件数 */
 function totalCount(order) {
@@ -150,6 +215,64 @@ async function loadOrders() {
     error.value = true
   } finally {
     loading.value = false
+  }
+}
+
+/** 确认收货 */
+async function handleConfirm(order) {
+  try {
+    await ElMessageBox.confirm('确认已经收到商品？', '确认收货', {
+      type: 'info',
+      confirmButtonText: '确认收货',
+      cancelButtonText: '取消'
+    })
+  } catch (error) {
+    return
+  }
+
+  confirmingId.value = order.id
+  try {
+    await confirmReceipt(order.id)
+    ElMessage.success('已确认收货')
+    await loadOrders()
+  } catch (error) {
+    // 错误提示由请求拦截器统一展示
+  } finally {
+    confirmingId.value = null
+  }
+}
+
+function openReturn(order) {
+  returnOrder.value = order
+  returnForm.return_type = 'refund'
+  returnForm.reason = ''
+  returnVisible.value = true
+}
+
+/** 提交退货 / 换货申请 */
+async function submitReturn() {
+  const reason = returnForm.reason.trim()
+  if (!reason) {
+    ElMessage.warning('请填写申请原因')
+    return
+  }
+  if (!returnOrder.value) {
+    return
+  }
+
+  submittingReturn.value = true
+  try {
+    await requestReturn(returnOrder.value.id, {
+      return_type: returnForm.return_type,
+      reason
+    })
+    ElMessage.success('申请已提交，等待管理员审批')
+    returnVisible.value = false
+    await loadOrders()
+  } catch (error) {
+    // 错误提示由请求拦截器统一展示
+  } finally {
+    submittingReturn.value = false
   }
 }
 
@@ -207,6 +330,11 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  color: #86868b;
+  font-size: 12px;
+}
+
+.order-tracking {
   color: #86868b;
   font-size: 12px;
 }
@@ -281,14 +409,37 @@ a.good-name:hover {
   font-weight: 600;
 }
 
+.order-return {
+  margin: 0 22px 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fff8eb;
+  color: #8a5a00;
+  font-size: 13px;
+}
+
 .order-foot {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: flex-end;
   gap: 18px;
   padding: 14px 22px;
   border-top: 1px solid #f0f0f2;
   flex-wrap: wrap;
+}
+
+.order-actions {
+  margin-right: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.return-tip {
+  margin-bottom: 14px;
+  color: #6e6e73;
+  font-size: 13px;
 }
 
 .order-count {

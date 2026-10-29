@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { setRouterInstance } from './instance'
 
@@ -10,6 +11,8 @@ import ProductDetail from '@/views/ProductDetail.vue'
 import Cart from '@/views/Cart.vue'
 import Checkout from '@/views/Checkout.vue'
 import OrderList from '@/views/OrderList.vue'
+import AdminProducts from '@/views/AdminProducts.vue'
+import AdminOrders from '@/views/AdminOrders.vue'
 
 const routes = [
   {
@@ -61,6 +64,22 @@ const routes = [
     meta: { title: '我的订单', requiresAuth: true }
   },
   {
+    path: '/admin',
+    redirect: '/admin/products'
+  },
+  {
+    path: '/admin/products',
+    name: 'admin-products',
+    component: AdminProducts,
+    meta: { title: '商品管理', requiresAuth: true, requiresAdmin: true }
+  },
+  {
+    path: '/admin/orders',
+    name: 'admin-orders',
+    component: AdminOrders,
+    meta: { title: '订单管理', requiresAuth: true, requiresAdmin: true }
+  },
+  {
     path: '/:pathMatch(.*)*',
     redirect: '/'
   }
@@ -95,6 +114,12 @@ router.beforeEach(async (to) => {
       path: '/login',
       query: { redirect: to.fullPath }
     }
+  }
+
+  // 后台页面：仅管理员可进入
+  if (to.meta.requiresAdmin && !userStore.isAdmin) {
+    ElMessage.warning('需要管理员权限')
+    return { path: '/' }
   }
 
   // 已登录用户不再进入登录 / 注册页

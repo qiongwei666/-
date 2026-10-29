@@ -269,3 +269,232 @@ def test_not_found_business_error(client: TestClient):
     assert response.status_code == 200
     assert response.json()["code"] == 404
     assert response.json()["data"] is None
+
+
+@pytest.fixture(scope="module")
+def admin(client: TestClient):
+    """注册测试管理员并把角色提升为 admin，返回鉴权信息。"""
+    register = client.post(
+        "/api/auth/register",
+        json={
+            "username": "pytest_admin",
+            "password": "123456",
+            "email": "pytest_admin@example.com",
+        },
+    )
+    assert register.json()["code"] == 0, register.text
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.username == "pytest_admin").one()
+        user.role = "admin"
+        db.commit()
+    finally:
+        db.close()
+
+    login = client.post(
+        "/api/auth/login",
+        json={"username": "pytest_admin", "password": "123456"},
+    ).json()
+    assert login["code"] == 0, login
+    assert login["data"]["user"]["role"] == "admin"
+
+    categories = client.get("/api/categories").json()["data"]
+    return {
+        "headers": {"Authorization": f"Bearer {login['data']['token']}"},
+        "category_id": categories[0]["id"],
+    }
+
+
+def _create_product(client: TestClient, admin, name: str, stock: int, price: float):
+    """通过管理员接口新建测试商品。"""
+    response = client.post(
+        "/api/admin/products",
+        json={
+            "name": name,
+            "description": "管理员后台新增的测试商品",
+            "price": price,
+            "stock": stock,
+            "category_id": admin["category_id"],
+            "image_url": "https://example.com/test-product.jpg",
+        },
+        headers=admin["headers"],
+    ).json()
+    assert response["code"] == 0, response
+    return response["data"]
+
+
+def test_admin_permission_guard(client: TestClient, auth, admin):
+    """普通用户与匿名请求都不能访问后台接口。"""
+    forbidden = client.get("/api/admin/products", headers=auth["headers"]).json()
+    assert forbidden["code"] == 403
+
+    unauthorized = client.get("/api/admin/products").json()
+    assert unauthorized["code"] == 401
+
+    ship_forbidden = client.post(
+        "/api/admin/orders/1/ship",
+        json={"tracking_no": None},
+        headers=auth["headers"],
+    ).json()
+    assert ship_forbidden["code"] == 403
+
+    allowed = client.get("/api/admin/orders", headers=admin["headers"]).json()
+    assert allowed["code"] == 0
+
+
+def test_admin_product_create_edit_and_delist(
+    client: TestClient, auth, admin
+):
+    """新增 / 编辑 / 下架商品：前台隐藏，后台仍可见。"""
+    product = _create_product(client, admin, "管理员新增商品", 5, 199.9)
+    assert product["status"] == "on_sale"
+
+    detail = client.get(f"/api/products/{product['id']}").json()
+    assert detail["code"] == 0
+
+    updated = client.put(
+        f"/api/admin/products/{product['id']}",
+        json={"price": 188.8, "stock": 8},
+        headers=admin["headers"],
+    ).json()
+    assert updated["code"] == 0, updated
+    assert updated["data"]["price"] == pytest.approx(188.8)
+    assert updated["data"]["stock"] == 8
+
+    off_sale = client.patch(
+        f"/api/admin/products/{product['id']}/status",
+        json={"status": "off_sale"},
+        headers=admin["headers"],
+    ).json()
+    assert off_sale["code"] == 0
+    assert off_sale["data"]["status"] == "off_sale"
+
+    public_list = client.get(
+        "/api/products", params={"keyword": "管理员新增商品"}
+    ).json()["data"]
+    assert public_list["total"] == 0
+    assert client.get(f"/api/products/{product['id']}").json()["code"] == 404
+
+    blocked = client.post(
+        "/api/cart",
+        json={"product_id": product["id"], "quantity": 1},
+        headers=auth["headers"],
+    ).json()
+    assert blocked["code"] == 400
+    assert "下架" in blocked["message"]
+
+    admin_list = client.get(
+        "/api/admin/products",
+        params={"keyword": "管理员新增商品"},
+        headers=admin["headers"],
+    ).json()["data"]
+    assert admin_list["total"] == 1
+    assert admin_list["items"][0]["status"] == "off_sale"
+
+
+def test_admin_ship_and_refund_restores_stock(client: TestClient, auth, admin):
+    """发货 -> 确认收货 -> 退款审批：恢复库存与销量，且不能重复审批。"""
+    product = _create_product(client, admin, "退款流程商品", 10, 50)
+    headers = auth["headers"]
+
+    added = client.post(
+        "/api/cart",
+        json={"product_id": product["id"], "quantity": 2},
+        headers=headers,
+    ).json()
+    assert added["code"] == 0, added
+
+    order = client.post("/api/orders", headers=headers).json()
+    assert order["code"] == 0, order
+    order_id = order["data"]["id"]
+    assert order["data"]["status"] == "paid"
+
+    shipped = client.post(
+        f"/api/admin/orders/{order_id}/ship",
+        json={"tracking_no": "SF1234567890"},
+        headers=admin["headers"],
+    ).json()
+    assert shipped["code"] == 0, shipped
+    assert shipped["data"]["status"] == "shipped"
+    assert shipped["data"]["tracking_no"] == "SF1234567890"
+
+    confirmed = client.post(
+        f"/api/orders/{order_id}/confirm", headers=headers
+    ).json()
+    assert confirmed["code"] == 0, confirmed
+    assert confirmed["data"]["status"] == "completed"
+
+    requested = client.post(
+        f"/api/orders/{order_id}/return",
+        json={"return_type": "refund", "reason": "商品与描述不符"},
+        headers=headers,
+    ).json()
+    assert requested["code"] == 0, requested
+    assert requested["data"]["status"] == "return_pending"
+    assert requested["data"]["return_type"] == "refund"
+
+    refunded = client.post(
+        f"/api/admin/orders/{order_id}/return-review",
+        json={"approve": True},
+        headers=admin["headers"],
+    ).json()
+    assert refunded["code"] == 0, refunded
+    assert refunded["data"]["status"] == "refunded"
+
+    db = SessionLocal()
+    try:
+        stored = db.get(Product, product["id"])
+        assert stored.stock == 10
+        assert stored.sales == 0
+    finally:
+        db.close()
+
+    repeated = client.post(
+        f"/api/admin/orders/{order_id}/return-review",
+        json={"approve": True},
+        headers=admin["headers"],
+    ).json()
+    assert repeated["code"] == 400
+
+
+def test_admin_reject_return_keeps_stock(client: TestClient, auth, admin):
+    """驳回换货申请：状态变为已驳回，库存不变。"""
+    product = _create_product(client, admin, "换货流程商品", 5, 30)
+    headers = auth["headers"]
+
+    client.post(
+        "/api/cart",
+        json={"product_id": product["id"], "quantity": 1},
+        headers=headers,
+    )
+    order = client.post("/api/orders", headers=headers).json()
+    order_id = order["data"]["id"]
+
+    client.post(
+        f"/api/admin/orders/{order_id}/ship",
+        json={"tracking_no": None},
+        headers=admin["headers"],
+    )
+    requested = client.post(
+        f"/api/orders/{order_id}/return",
+        json={"return_type": "exchange", "reason": "尺码不合适"},
+        headers=headers,
+    ).json()
+    assert requested["code"] == 0
+    assert requested["data"]["return_type"] == "exchange"
+
+    rejected = client.post(
+        f"/api/admin/orders/{order_id}/return-review",
+        json={"approve": False},
+        headers=admin["headers"],
+    ).json()
+    assert rejected["code"] == 0, rejected
+    assert rejected["data"]["status"] == "return_rejected"
+
+    db = SessionLocal()
+    try:
+        stored = db.get(Product, product["id"])
+        assert stored.stock == 4
+    finally:
+        db.close()

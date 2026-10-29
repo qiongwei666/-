@@ -12,7 +12,10 @@
 - 分类树、商品列表、关键词搜索、分类筛选、分页、商品详情
 - 购物车增删改查、库存校验、数量与小计
 - 从购物车结算下单：扣库存、加销量、清空购物车、记录 `buy` 行为
-- 我的订单列表与订单明细
+- 我的订单列表与订单明细，展示快递单号与退换货信息
+- 订单状态流转：`paid → shipped → completed`，用户可确认收货
+- 退货 / 换货申请与管理员审批：退款自动回补库存，换货为状态流转
+- 管理员后台：商品新增 / 编辑 / 上下架（图片填 URL），订单发货与退换货审批
 - 用户行为采集：`view / click / cart / buy`，后端映射权重 `1 / 2 / 3 / 5`
 - 点击商品卡片上报 `click`，进入详情页上报 `view`
 - 首页个性化推荐、商品详情“看了又看”、全局热销榜
@@ -69,11 +72,11 @@ ecommerce-rec/
 │   │   ├── redis_client.py     # 懒加载 Redis 客户端
 │   │   ├── models/             # 7 张 ORM 表
 │   │   ├── schemas/            # Pydantic v2 Schema
-│   │   ├── routers/            # 7 组 API
-│   │   ├── services/           # 认证 / 商品 / 订单 / 推荐业务
+│   │   ├── routers/            # 8 组 API（含 /admin 管理后台）
+│   │   ├── services/           # 认证 / 商品 / 订单 / 管理后台 / 推荐业务
 │   │   ├── utils/              # JWT、bcrypt、依赖、统一响应
 │   │   ├── static/swagger-ui/  # 自托管 Swagger UI（离线可用）
-│   │   └── data/seed.py        # 300 用户 / 200 商品 / 2.2w+ 行为
+│   │   └── data/seed.py        # 300 用户 / 198 商品 / 2.2w+ 行为
 │   └── tests/test_api.py       # 主流程 + 降级集成测试
 ├── recommender/
 │   ├── config.py               # 与 backend/.env 共用配置
@@ -93,15 +96,19 @@ ecommerce-rec/
 
 | 表 | 关键字段 | 说明 |
 | --- | --- | --- |
-| `user` | id, username, password_hash, email, created_at | 用户 |
+| `user` | id, username, password_hash, email, **role**, created_at | 用户，`role` 为 `user / admin` |
 | `category` | id, name, parent_id | 二级分类树 |
-| `product` | id, name, description, price, stock, category_id, sales, image_url | 商品 |
+| `product` | id, name, description, price, stock, category_id, sales, image_url, **status** | 商品，`status` 为 `on_sale / off_sale` |
 | `cart_item` | id, user_id, product_id, quantity | 唯一约束 `(user_id, product_id)` |
-| `order` | id, user_id, total_amount, status, created_at | 订单，默认 `paid` |
+| `order` | id, user_id, total_amount, status, **tracking_no, shipped_at, return_type, return_reason**, created_at | 订单，默认 `paid` |
 | `order_item` | id, order_id, product_id, quantity, price | 成交价快照 |
 | `user_behavior` | id, user_id, product_id, behavior_type, weight, created_at | 推荐数据源 |
 
 `user_behavior` 建立 `idx_user_time(user_id, created_at)` 与 `idx_product(product_id)` 索引。
+
+订单状态机（仅允许以下流转）：`paid` –发货→ `shipped` –确认收货→ `completed` –申请退换→ `return_pending` –审批→ `refunded / exchanged / return_rejected`。
+
+> 本次新增 `user.role`、`product.status` 与订单物流 / 退换字段。项目没有 Alembic，已有数据库必须重新执行 `python -m app.data.seed`（会重建表）。
 
 ### 4.2 Redis 键
 
@@ -213,8 +220,10 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 - Swagger 文档：<http://127.0.0.1:8000/docs>（本地静态资源，离线可用）
 - 健康检查：<http://127.0.0.1:8000/api/health>（返回 database / redis / **python_version**）
-- seed 会重建业务表并打印：用户 300、商品 200、行为 22295。
-- 演示账号：**demo / 123456**（所有种子用户密码均为 `123456`）。
+- seed 会重建业务表并打印：用户 300、商品 198、行为 22458。
+- 演示账号（密码均为 `123456`）：
+  - **admin / 123456**：管理员，可进入管理后台；
+  - **demo / 123456**：普通用户，用于演示推荐与下单流程。
 
 ### 5.3 训练推荐模型（终端 2）
 
@@ -283,13 +292,22 @@ pytest -q
 | DELETE | `/api/cart/{id}` | 是 | 删除 |
 | POST | `/api/orders` | 是 | 从购物车结算 |
 | GET | `/api/orders` | 是 | 我的订单 |
+| POST | `/api/orders/{id}/confirm` | 是 | 确认收货 |
+| POST | `/api/orders/{id}/return` | 是 | 申请退货 / 换货 |
+| GET | `/api/admin/products` | 管理员 | 后台商品分页（含下架） |
+| POST | `/api/admin/products` | 管理员 | 新增商品（图片填 URL） |
+| PUT | `/api/admin/products/{id}` | 管理员 | 编辑商品 |
+| PATCH | `/api/admin/products/{id}/status` | 管理员 | 上架 / 下架 |
+| GET | `/api/admin/orders` | 管理员 | 全部订单分页 |
+| POST | `/api/admin/orders/{id}/ship` | 管理员 | 发货（可选快递单号） |
+| POST | `/api/admin/orders/{id}/return-review` | 管理员 | 同意 / 驳回退换货 |
 | POST | `/api/behavior` | 是 | 上报行为，weight 后端映射 |
 | GET | `/api/recommend?scene=home&limit=10` | 是 | 首页个性化推荐 |
 | GET | `/api/recommend/similar/{product_id}?limit=8&offset=0` | 否 | 看了又看，支持滚动分页 |
 | GET | `/api/recommend/hot?limit=10` | 否 | 全局热销榜 |
 | GET | `/api/health` | 否 | 数据库 / Redis 健康检查 |
 
-FastAPI 的完整参数与响应模型见 `/docs`。
+管理端接口统一校验 `role=admin`，普通用户返回 `code=403`，未登录返回 `code=401`。FastAPI 的完整参数与响应模型见 `/docs`。
 
 ---
 
@@ -364,7 +382,7 @@ ALS 的 Precision@10 约为随机基线的 **6.6 倍**，证明用户-商品隐�
 - 单机 `local[*]` 跑 PySpark，仅用于课程演示，不做分布式集群与高并发压测。
 - ALS 将“行为权重求和”作为隐式反馈置信度，未做实时增量训练；新行为由 15 分钟 TTL 的共访缓存提供短期实时补充，长期偏好仍在下次离线训练后生效。
 - 推荐结果未做多样性重排、曝光去重和线上 A/B 实验。
-- 支付为模拟流程，下单即 `paid`；没有退款、优惠券、库存超卖分布式锁。
+- 支付为模拟流程，下单即 `paid`；发货与退换货为演示级状态流转：退款回补库存并扣减销量，换货仅改状态（不生成换货新单、不补发库存）；没有真实支付回调、优惠券与分布式库存锁。
 - 商品图使用京东 / 苏宁 / 阿里 CDN 外链，网络不可用时会显示前端内置占位图。
 - 评估采用离线时间切分，只反映历史数据上的排序效果，不等同于线上收益。
 
@@ -394,13 +412,14 @@ ALS 的 Precision@10 约为随机基线的 **6.6 倍**，证明用户-商品隐�
 | # | 验收项 | 结果 |
 | --- | --- | --- |
 | 1 | MySQL / Redis 可用 | 本机 MySQL 8.0.26 + Redis 5.0.14（兼容 Redis 7 指令）运行正常；`docker-compose.yml` 已通过 YAML 解析与密码一致性检查。当前开发机未安装 Docker Desktop，故运行验证使用本机中间件，Compose 启动方式已写入 README。 |
-| 2 | `/docs` 可访问 | 200；Swagger UI 静态资源已本地化，15 个 OpenAPI 路径全部可见。 |
-| 3 | seed 数据量 | 用户 300、商品 200、一级分类 10 / 子分类 20、行为 22,295 条；演示过程中会继续累积真实浏览行为。 |
+| 2 | `/docs` 可访问 | 200；Swagger UI 静态资源已本地化，23 个 OpenAPI 路径全部可见（含 7 个管理端接口）。 |
+| 3 | seed 数据量 | 用户 300（含 `admin`）、商品 198、一级分类 10 / 子分类 50、行为 22,458 条；商品图片 198 张互不重复，演示过程中会继续累积真实浏览行为。 |
 | 4 | 主流程 | 在本机 MySQL 上实测注册 → 登录 → 浏览 → 加购 → 下单 → 订单查询成功，测试后已清理临时用户并恢复库存。 |
 | 5 | 行为权重 | 实测 view=1、click=2、cart=3、buy=5；下单由后端自动写入 buy。 |
-| 6 | ALS 训练 | Python 3.13.5 + PySpark 4.0.5 下 `train_als.py` 退出码 0；Redis 中 `rec:user:*=300`、`sim:item:*=200`、`hot:global=200`、`hot:category:*=30`。 |
-| 7 | 推荐差异 | 演示用户首页策略为 `als`；清空该用户推荐缓存模拟新用户后，策略降级为 `hot`。 |
+| 6 | ALS 训练 | Python 3.13.5 + PySpark 4.0.5 下 `train_als.py` 退出码 0；Redis 中 `rec:user:*=300`、`sim:item:*=198`、`hot:global=198`、`hot:category:*=60`（50 个子分类 + 10 个一级分类）。 |
+| 7 | 推荐差异 | 演示用户首页策略为 `als`；清空 ALS 缓存后，有行为数据的用户降级为 `behavior`（按行为权重聚合类目偏好），无行为数据时降级为 `hot`。 |
 | 8 | 看了又看 | 策略 `hybrid`（ALS + 真实共访）；首屏 8 条，滚动后 8 → 16 → 24，无重复，末尾显示“已经到底了”。 |
 | 9 | 离线评估 | 三组指标齐全，`evaluation_result.md` 自动生成。 |
-| 10 | Redis 故障降级 | 指向不可达 Redis 时，首页约 0.28s 返回 `hot`，相似商品约 0.04s 返回 `coview`，始终 `code=0`（已加 3s 熔断，避免连续尝试 Redis）。 |
-| 11 | 测试与构建 | Python **3.13.5** 下 `pytest -q`：5 passed；`npm run build`：成功，1714 modules transformed。 |
+| 10 | Redis 故障降级 | 指向不可达 Redis 时，匿名首页约 0.28s 返回 `hot`，登录用户首页返回 `behavior`，相似商品约 0.04s 返回 `coview`，始终 `code=0`（已加 3s 熔断，避免连续尝试 Redis）。 |
+| 11 | 测试与构建 | Python **3.13.5** 下 `pytest -q`：9 passed；`npm run build`：成功，1719 modules transformed。 |
+| 12 | 管理员流程 | `admin` 登录返回 `role=admin`，`demo` 访问 `/api/admin/products` 返回 `code=403`，前端访问 `/admin/products` 被重定向回首页；管理员新增商品 → 下架后前台列表不含、详情 404、加购 400，后台仍可见；发货（带单号）→ 确认收货 → 申请退款 → 同意退款后库存恢复、销量回落，重复审批返回 400。 |

@@ -58,8 +58,8 @@ def list_products(
     category_id: int | None = None,
     keyword: str | None = None,
 ) -> tuple[list[Product], int]:
-    """分页查询商品，支持分类（含子分类）与关键词。"""
-    conditions = []
+    """分页查询商品，支持分类（含子分类）与关键词，仅返回上架商品。"""
+    conditions = [Product.status == "on_sale"]
     if category_id is not None:
         category_ids = get_descendant_category_ids(db, category_id)
         conditions.append(Product.category_id.in_(category_ids))
@@ -91,7 +91,7 @@ def get_product(db: Session, product_id: int) -> Product:
     """按 ID 查询商品，不存在时抛业务异常。"""
     product = db.scalar(
         select(Product)
-        .where(Product.id == product_id)
+        .where(Product.id == product_id, Product.status == "on_sale")
         .options(joinedload(Product.category))
     )
     if product is None:
