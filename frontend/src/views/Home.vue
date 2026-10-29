@@ -107,9 +107,16 @@
         </el-empty>
       </section>
 
-      <!-- 个性化推荐：组件内部独立请求，未登录自动使用热销兜底 -->
+      <!-- 个性化推荐：组件内部独立请求，滚动到底部继续加载 -->
       <section class="section-block">
-        <RecommendPanel scene="home" :limit="8" title="为你推荐" />
+        <RecommendPanel
+          scene="home"
+          :limit="8"
+          :max-items="48"
+          :anonymous-offset="8"
+          infinite
+          title="为你推荐"
+        />
       </section>
     </div>
   </div>
@@ -185,7 +192,7 @@ async function loadCategories() {
 async function loadHotProducts() {
   hotLoading.value = true
   try {
-    const data = await getHot(8, { silent: true })
+    const data = await getHot(8, 0, { silent: true })
     hotProducts.value = Array.isArray(data?.items) ? data.items : []
   } catch (error) {
     try {

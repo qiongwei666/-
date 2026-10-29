@@ -2,7 +2,7 @@ import request from './request'
 
 /**
  * 个性化推荐（需要登录）
- * @param {object} params { scene: 'home', limit: number }
+ * @param {object} params { scene: 'home', limit: number, offset: number }
  */
 export function getRecommend(params = {}, config = {}) {
   return request.get('/recommend', {
@@ -10,6 +10,7 @@ export function getRecommend(params = {}, config = {}) {
     params: {
       scene: 'home',
       limit: 10,
+      offset: 0,
       ...params
     }
   })
@@ -32,10 +33,14 @@ export function getSimilar(productId, params = {}, config = {}) {
   })
 }
 
-/** 热门商品推荐（无需登录，作为未登录时的兜底） */
-export function getHot(limit = 10, config = {}) {
+/**
+ * 热门商品推荐（无需登录，作为未登录时的兜底）
+ * @param {number} limit 每批数量
+ * @param {number} offset 偏移量，用于滚动加载
+ */
+export function getHot(limit = 10, offset = 0, config = {}) {
   return request.get('/recommend/hot', {
     ...config,
-    params: { limit }
+    params: { limit, offset }
   })
 }

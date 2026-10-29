@@ -276,6 +276,59 @@ def _category_products(
     return list(db.scalars(stmt).unique().all())
 
 
+def _user_interacted_ids(db: Session, user_id: int) -> set[int]:
+    """用户已产生过行为的商品 ID，个性化召回时不再重复推荐。"""
+    stmt = (
+        select(UserBehavior.product_id)
+        .where(UserBehavior.user_id == user_id)
+        .distinct()
+    )
+    return set(db.scalars(stmt).all())
+
+
+def _behavior_candidates(
+    db: Session,
+    user_id: int,
+    limit: int,
+    interacted: set[int] | None = None,
+) -> list[Product]:
+    """按行为类目偏好召回候选。
+
+    Redis 中的 ALS 结果缺失时（未训练、新行为、Redis 故障），用
+    view/click/cart/buy 的加权次数统计类目偏好：偏好越高的类目越靠前，
+    同类目内按销量排序，并排除用户已有行为的商品。没有行为时返回空列表，
+    由全局热销兜底。
+    """
+    affinity_rows = db.execute(
+        select(Product.category_id, func.sum(UserBehavior.weight).label("score"))
+        .join(Product, Product.id == UserBehavior.product_id)
+        .where(UserBehavior.user_id == user_id)
+        .group_by(Product.category_id)
+    ).all()
+    if not affinity_rows:
+        return []
+
+    affinity = {
+        int(row.category_id): float(row.score or 0) for row in affinity_rows
+    }
+    max_score = max(affinity.values()) or 1.0
+    if interacted is None:
+        interacted = _user_interacted_ids(db, user_id)
+
+    stmt = select(Product).options(joinedload(Product.category))
+    if interacted:
+        stmt = stmt.where(Product.id.notin_(interacted))
+    products = list(db.scalars(stmt).unique().all())
+    products.sort(
+        key=lambda item: (
+            -affinity.get(item.category_id, 0.0) / max_score,
+            -item.sales,
+            item.id,
+        )
+    )
+    return products[:limit]
+
+
 def _build_similar_ranking(
     db: Session,
     product: Product,
@@ -348,40 +401,65 @@ def _build_similar_ranking(
     return ranked, strategy
 
 
-def get_hot_products(db: Session, limit: int = 10) -> tuple[list[Product], str]:
-    """全局热销榜。异常时返回数据库热销，绝不上抛。"""
+def get_hot_products(
+    db: Session, limit: int = 10, offset: int = 0
+) -> tuple[list[Product], str]:
+    """全局热销榜，支持 offset 分页。异常时返回数据库热销，绝不上抛。"""
     limit = max(1, min(limit, 50))
+    offset = max(0, offset)
     try:
-        products = _hot_products(db, limit)
-        return products, "hot"
+        products = _hot_products(db, offset + limit)
+        return products[offset : offset + limit], "hot"
     except Exception as exc:
         logger.exception("获取热销商品失败: %s", exc)
         return [], "empty"
 
 
 def get_home_recommendations(
-    db: Session, user_id: int, limit: int = 10
+    db: Session, user_id: int, limit: int = 10, offset: int = 0
 ) -> tuple[list[Product], str]:
-    """首页个性化推荐。
+    """首页个性化推荐，支持 offset 分页。
 
-    流程：rec:user:{uid} -> 热销补齐 -> 全局热销兜底。
-    Redis 或缓存解析异常不会抛给前端。
+    流程：rec:user:{uid}（ALS）-> 行为类目偏好召回 -> 热销补齐。
+    ALS 缓存缺失或 Redis 故障时仍能给出与热销榜不同的个性化结果；
+    任何异常最终降级为热销，不会抛给前端。
     """
     limit = max(1, min(limit, 50))
+    offset = max(0, offset)
+    need = offset + limit
     try:
         cached_ids = _read_ids(f"rec:user:{user_id}")
-        if cached_ids:
-            products = _fetch_products(db, cached_ids[:limit])
-            if products:
-                if len(products) < limit:
-                    exclude = {item.id for item in products}
-                    products = _merge(products, _hot_products(db, limit, exclude), limit)
-                return products, "als"
-    except Exception as exc:
-        logger.exception("读取个性化推荐失败，降级热销: %s", exc)
+        als_products = _fetch_products(db, cached_ids) if cached_ids else []
 
-    # 新用户或 Redis 故障：热销兜底
-    return get_hot_products(db, limit)
+        interacted = _user_interacted_ids(db, user_id)
+        behavior_products = _behavior_candidates(
+            db, user_id, need, interacted=interacted
+        )
+
+        products = _merge(als_products, behavior_products, need)
+        if len(products) < need:
+            exclude = {item.id for item in products}
+            if behavior_products:
+                # 个性化链路下不把已浏览/购买的商品重新塞回列表
+                exclude |= interacted
+            products = _merge(products, _hot_products(db, need, exclude), need)
+
+        if not products:
+            return [], "empty"
+        if als_products:
+            strategy = "als"
+        elif behavior_products:
+            strategy = "behavior"
+        else:
+            strategy = "hot"
+        return products[offset : offset + limit], strategy
+    except Exception as exc:
+        logger.exception("生成首页推荐失败，降级热销: %s", exc)
+        try:
+            products = _hot_products(db, need)
+            return products[offset : offset + limit], "hot"
+        except Exception:
+            return [], "empty"
 
 
 def get_similar_products(

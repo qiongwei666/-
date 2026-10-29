@@ -22,11 +22,14 @@ def recommend(
     db: DbSession,
     scene: str = Query(default="home", description="推荐场景，目前支持 home"),
     limit: int = Query(default=10, ge=1, le=50),
+    offset: int = Query(default=0, ge=0, le=500, description="偏移量，用于滚动加载"),
 ) -> dict:
-    """ALS 个性化结果；新用户或 Redis 故障时自动返回全局热销。"""
+    """ALS 个性化结果；无缓存时按行为类目偏好召回，最后热销兜底。"""
     if scene != "home":
         raise BizError(400, "暂不支持的推荐场景")
-    items, strategy = get_home_recommendations(db, current_user.id, limit)
+    items, strategy = get_home_recommendations(
+        db, current_user.id, limit, offset
+    )
     return success(
         RecommendResponse(items=items, strategy=strategy, scene=scene)
     )
@@ -58,7 +61,8 @@ def similar_products(
 def hot_products(
     db: DbSession,
     limit: int = Query(default=10, ge=1, le=50),
+    offset: int = Query(default=0, ge=0, le=500, description="偏移量，用于滚动加载"),
 ) -> dict:
-    """Redis ZSET 热销榜，缓存不可用时查数据库。"""
-    items, strategy = get_hot_products(db, limit)
+    """Redis ZSET 热销榜，缓存不可用时查数据库，支持 offset 分页。"""
+    items, strategy = get_hot_products(db, limit, offset)
     return success(RecommendResponse(items=items, strategy=strategy, scene="hot"))

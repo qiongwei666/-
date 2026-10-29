@@ -216,11 +216,12 @@ def test_cart_order_behavior_and_recommend(client: TestClient, auth):
     finally:
         db.close()
 
-    # Redis 不可用：推荐应返回热销兜底，而不是报错
+    # Redis 不可用：按行为类目偏好实时召回，而不是报错
     home = client.get("/api/recommend", headers=headers).json()
     assert home["code"] == 0
-    assert home["data"]["strategy"] == "hot"
+    assert home["data"]["strategy"] == "behavior"
     assert len(home["data"]["items"]) >= 1
+    assert all(item["id"] != product["id"] for item in home["data"]["items"])
 
     hot = client.get("/api/recommend/hot").json()
     assert hot["code"] == 0
@@ -249,6 +250,17 @@ def test_cart_order_behavior_and_recommend(client: TestClient, auth):
     first_ids = {item["id"] for item in first_page}
     second_ids = {item["id"] for item in second_page}
     assert not first_ids & second_ids
+
+    # 首页个性化推荐同样支持滚动分页
+    home_first = client.get(
+        "/api/recommend", headers=headers, params={"limit": 2, "offset": 0}
+    ).json()["data"]["items"]
+    home_second = client.get(
+        "/api/recommend", headers=headers, params={"limit": 2, "offset": 2}
+    ).json()["data"]["items"]
+    assert not {item["id"] for item in home_first} & {
+        item["id"] for item in home_second
+    }
 
 
 def test_not_found_business_error(client: TestClient):

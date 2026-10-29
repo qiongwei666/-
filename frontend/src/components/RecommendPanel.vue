@@ -53,7 +53,15 @@
           :loading="loadingMore"
           @click="loadMore"
         >
-          {{ loadMoreError ? '加载失败，点击重试' : loadingMore ? '正在加载更多' : '加载更多相似商品' }}
+          {{
+            loadMoreError
+              ? '加载失败，点击重试'
+              : loadingMore
+                ? '正在加载更多'
+                : scene === 'similar'
+                  ? '加载更多相似商品'
+                  : '加载更多'
+          }}
         </el-button>
         <span v-else class="load-more-end">已经到底了</span>
       </div>
@@ -99,6 +107,11 @@ const props = defineProps({
   maxItems: {
     type: Number,
     default: 24
+  },
+  // 未登录时跳过热销榜前 N 件（首页上方已展示同样内容）
+  anonymousOffset: {
+    type: Number,
+    default: 0
   }
 })
 
@@ -131,14 +144,18 @@ const resolvedSubtitle = computed(() => {
   if (props.subtitle) {
     return props.subtitle
   }
-  return props.scene === 'similar'
-    ? '根据你刚刚浏览的商品，混合 ALS 协同过滤、真实共访与内容相似实时生成'
-    : '结合你的历史浏览、收藏与购买偏好生成'
+  if (props.scene === 'similar') {
+    return '根据你刚刚浏览的商品，混合 ALS 协同过滤、真实共访与内容相似实时生成'
+  }
+  return userStore.isLoggedIn
+    ? '结合你的历史浏览、收藏与购买偏好生成'
+    : '登录后解锁个性化推荐，先看看更多热销好物'
 })
 
 // 后端推荐策略标识 -> 中文文案
 const STRATEGY_LABELS = {
   als: '个性化推荐',
+  behavior: '行为偏好推荐',
   item_als: '物品协同过滤',
   hybrid: 'ALS + 行为共访',
   coview: '真实行为共访',
@@ -153,7 +170,7 @@ const strategyText = computed(() => {
   return STRATEGY_LABELS[key] || strategy.value
 })
 
-/** 请求一页数据；首页接口不支持 offset，仅详情页支持 */
+/** 请求一页数据，首页与详情页都支持 offset 滚动加载 */
 async function fetchPage(offset) {
   if (props.scene === 'similar') {
     if (!props.productId) {
@@ -167,9 +184,15 @@ async function fetchPage(offset) {
   }
 
   if (userStore.isLoggedIn) {
-    return getRecommend({ scene: 'home', limit: pageSize.value }, { silent: true })
+    return getRecommend(
+      { scene: 'home', limit: pageSize.value, offset },
+      { silent: true }
+    )
   }
-  return getHot(pageSize.value, { silent: true })
+
+  // 未登录时用热销兜底，并跳过页面上方“热销商品”已经展示的前 N 件
+  const skip = Math.max(Number(props.anonymousOffset) || 0, 0)
+  return getHot(pageSize.value, offset + skip, { silent: true })
 }
 
 /** 首屏 / 商品切换时重置并加载 */
@@ -283,6 +306,7 @@ watch(
     () => props.productId,
     () => props.limit,
     () => props.maxItems,
+    () => props.anonymousOffset,
     () => userStore.isLoggedIn
   ],
   () => {
