@@ -11,6 +11,7 @@ import ProductDetail from '@/views/ProductDetail.vue'
 import Cart from '@/views/Cart.vue'
 import Checkout from '@/views/Checkout.vue'
 import OrderList from '@/views/OrderList.vue'
+import AddressBook from '@/views/AddressBook.vue'
 import AdminProducts from '@/views/AdminProducts.vue'
 import AdminOrders from '@/views/AdminOrders.vue'
 
@@ -62,6 +63,12 @@ const routes = [
     name: 'orders',
     component: OrderList,
     meta: { title: '我的订单', requiresAuth: true }
+  },
+  {
+    path: '/addresses',
+    name: 'addresses',
+    component: AddressBook,
+    meta: { title: '收货地址', requiresAuth: true }
   },
   {
     path: '/admin',

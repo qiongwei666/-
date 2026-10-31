@@ -12,6 +12,7 @@ from app.models.order import Order, OrderItem
 from app.models.product import Product
 from app.models.user import User
 from app.schemas.admin import ReturnCreate
+from app.services.address_service import get_owned_address
 from app.utils.exceptions import BizError
 
 
@@ -106,16 +107,29 @@ def delete_cart_item(db: Session, user_id: int, item_id: int) -> None:
     db.commit()
 
 
-def create_order_from_cart(db: Session, user: User) -> Order:
+def create_order_from_cart(
+    db: Session, user: User, address_id: int | None = None
+) -> Order:
     """从购物车结算：扣库存、加销量、清空购物车并记录 buy 行为。"""
     cart_items = get_cart_items(db, user.id)
     if not cart_items:
         raise BizError(400, "购物车为空，无法下单")
 
+    # 先校验地址归属，避免非法请求改动购物车与库存
+    address = get_owned_address(db, user.id, address_id) if address_id else None
+
     total_amount = Decimal("0")
     now = datetime.now()
     try:
-        order = Order(user_id=user.id, total_amount=Decimal("0"), status="paid", created_at=now)
+        order = Order(
+            user_id=user.id,
+            total_amount=Decimal("0"),
+            status="paid",
+            created_at=now,
+            receiver_name=address.receiver_name if address else None,
+            receiver_phone=address.phone if address else None,
+            receiver_address=address.address if address else None,
+        )
         db.add(order)
         db.flush()  # 获取订单 ID
 

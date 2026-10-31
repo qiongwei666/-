@@ -14,6 +14,7 @@ from decimal import Decimal
 
 from app.data.product_images import IMAGES
 from app.database import Base, SessionLocal, engine, ensure_database
+from app.models.address import Address
 from app.models.behavior import BEHAVIOR_WEIGHTS, UserBehavior
 from app.models.cart import CartItem
 from app.models.category import Category
@@ -270,7 +271,11 @@ def build_products(
 
 
 def build_order(
-    rng: random.Random, user: User, products: list[Product], days_ago: int
+    rng: random.Random,
+    user: User,
+    products: list[Product],
+    days_ago: int,
+    address: Address | None = None,
 ) -> Order:
     """为演示用户构造历史订单。"""
     chosen = rng.sample(products, 2)
@@ -279,6 +284,9 @@ def build_order(
         total_amount=Decimal("0"),
         status="paid",
         created_at=datetime.now() - timedelta(days=days_ago),
+        receiver_name=address.receiver_name if address else None,
+        receiver_phone=address.phone if address else None,
+        receiver_address=address.address if address else None,
     )
     total = Decimal("0")
     for product in chosen:
@@ -422,11 +430,30 @@ def seed() -> None:
         db.commit()
         print("[seed] 商品销量已根据行为热度回填")
 
-        # ---------- 演示用户订单与购物车 ----------
+        # ---------- 演示用户收货地址、订单与购物车 ----------
         demo_user = next(user for user in users if user.username == "demo")
+        demo_addresses = [
+            Address(
+                user_id=demo_user.id,
+                receiver_name="演示用户",
+                phone="13800001234",
+                address="北京市海淀区中关村大街 1 号 品寻大厦 8 层 801 室",
+                is_default=True,
+            ),
+            Address(
+                user_id=demo_user.id,
+                receiver_name="演示用户（公司）",
+                phone="13900005678",
+                address="上海市浦东新区世纪大道 100 号 环球金融中心 20 层",
+                is_default=False,
+            ),
+        ]
+        db.add_all(demo_addresses)
+        db.flush()
+
         demo_products = products_by_root[root_ids[0]] + products_by_root[root_ids[1]]
-        db.add(build_order(rng, demo_user, demo_products[:10], 9))
-        db.add(build_order(rng, demo_user, demo_products[10:20], 3))
+        db.add(build_order(rng, demo_user, demo_products[:10], 9, demo_addresses[0]))
+        db.add(build_order(rng, demo_user, demo_products[10:20], 3, demo_addresses[1]))
         db.add_all(
             [
                 CartItem(user_id=demo_user.id, product_id=demo_products[0].id, quantity=1),
@@ -434,7 +461,9 @@ def seed() -> None:
             ]
         )
         db.commit()
-        print("[seed] 演示用户 demo 已生成 2 笔订单与 2 条购物车记录")
+        print(
+            "[seed] 演示用户 demo 已生成 2 条收货地址、2 笔订单与 2 条购物车记录"
+        )
 
         user_count = db.query(User).count()
         product_count = db.query(Product).count()

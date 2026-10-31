@@ -1,5 +1,6 @@
 """ORM 模型统一导出，导入本包即可完成元数据注册。"""
 
+from app.models.address import Address
 from app.models.behavior import BEHAVIOR_WEIGHTS, UserBehavior
 from app.models.cart import CartItem
 from app.models.category import Category
@@ -8,6 +9,7 @@ from app.models.product import Product
 from app.models.user import User
 
 __all__ = [
+    "Address",
     "BEHAVIOR_WEIGHTS",
     "CartItem",
     "Category",

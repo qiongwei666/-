@@ -22,7 +22,11 @@ class User(Base):
         String(120), unique=True, nullable=False, index=True
     )
     role: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="user", index=True
+        String(20),
+        nullable=False,
+        default="user",
+        server_default="user",
+        index=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, nullable=False
@@ -30,6 +34,9 @@ class User(Base):
 
     cart_items = relationship(
         "CartItem", back_populates="user", cascade="all, delete-orphan"
+    )
+    addresses = relationship(
+        "Address", back_populates="user", cascade="all, delete-orphan"
     )
     orders = relationship("Order", back_populates="user", cascade="all, delete-orphan")
     behaviors = relationship(

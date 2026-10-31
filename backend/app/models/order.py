@@ -26,6 +26,10 @@ class Order(Base):
     shipped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     return_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
     return_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # 下单时的收货地址快照，地址簿修改或删除后仍保持历史订单不变
+    receiver_name: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    receiver_phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    receiver_address: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, nullable=False, index=True
     )

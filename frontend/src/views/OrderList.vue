@@ -56,6 +56,19 @@
           </el-tag>
         </div>
 
+        <div
+          v-if="order.receiver_name || order.receiver_phone || order.receiver_address"
+          class="order-address"
+        >
+          <el-icon><Location /></el-icon>
+          <span>
+            收货信息：{{ order.receiver_name }} {{ order.receiver_phone }}
+            <span v-if="order.receiver_address" class="address-detail">
+              · {{ order.receiver_address }}
+            </span>
+          </span>
+        </div>
+
         <div class="order-goods">
           <div v-if="!order.items || !order.items.length" class="order-goods-empty">
             暂无商品明细
@@ -339,6 +352,25 @@ onMounted(() => {
   font-size: 12px;
 }
 
+.order-address {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 12px 22px 0;
+  color: #6e6e73;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.order-address .el-icon {
+  margin-top: 3px;
+  color: #86868b;
+}
+
+.address-detail {
+  color: #86868b;
+}
+
 .order-goods {
   padding: 4px 22px;
 }
@@ -465,6 +497,7 @@ a.good-name:hover {
 
 @media (max-width: 768px) {
   .order-head,
+  .order-address,
   .order-goods,
   .order-foot {
     padding-left: 16px;

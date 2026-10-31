@@ -40,6 +40,14 @@
         <el-table-column type="expand">
           <template #default="{ row }">
             <div class="order-detail">
+              <div class="detail-address">
+                <span class="detail-address-label">收货信息：</span>
+                <span v-if="row.receiver_name || row.receiver_address">
+                  {{ row.receiver_name }} {{ row.receiver_phone }}
+                  <span class="detail-address-text">{{ row.receiver_address }}</span>
+                </span>
+                <span v-else class="detail-empty">-</span>
+              </div>
               <div v-if="!row.items || !row.items.length" class="detail-empty">
                 暂无商品明细
               </div>
@@ -330,6 +338,22 @@ onMounted(() => {
 
 .order-detail {
   padding: 4px 16px 12px 44px;
+}
+
+.detail-address {
+  margin-bottom: 8px;
+  color: #6e6e73;
+  font-size: 13px;
+}
+
+.detail-address-label {
+  color: #1d1d1f;
+  font-weight: 500;
+}
+
+.detail-address-text {
+  margin-left: 8px;
+  color: #86868b;
 }
 
 .detail-empty {

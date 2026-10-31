@@ -4,7 +4,7 @@ from fastapi import APIRouter
 
 from app.schemas.admin import ReturnCreate
 from app.schemas.common import ApiResponse
-from app.schemas.order import OrderOut
+from app.schemas.order import OrderCreateIn, OrderOut
 from app.services.order_service import (
     confirm_receipt,
     create_order_from_cart,
@@ -18,9 +18,18 @@ router = APIRouter(prefix="/orders", tags=["订单"])
 
 
 @router.post("", response_model=ApiResponse[OrderOut], summary="从购物车结算")
-def create_order(current_user: CurrentUser, db: DbSession) -> dict:
-    """模拟支付成功：创建订单、扣库存、加销量、清空购物车、上报 buy 行为。"""
-    order = create_order_from_cart(db, current_user)
+def create_order(
+    current_user: CurrentUser,
+    db: DbSession,
+    payload: OrderCreateIn | None = None,
+) -> dict:
+    """模拟支付成功：创建订单、扣库存、加销量、清空购物车、上报 buy 行为。
+
+    可选请求体 `{"address_id": n}` 指定收货地址，订单会保存地址快照。
+    """
+    order = create_order_from_cart(
+        db, current_user, payload.address_id if payload else None
+    )
     return success(order, "下单成功")
 
 

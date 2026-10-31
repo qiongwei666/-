@@ -498,3 +498,240 @@ def test_admin_reject_return_keeps_stock(client: TestClient, auth, admin):
         assert stored.stock == 4
     finally:
         db.close()
+
+
+def _register_and_login(client: TestClient, username: str) -> dict:
+    """注册并登录独立测试用户，返回鉴权请求头。"""
+    register = client.post(
+        "/api/auth/register",
+        json={
+            "username": username,
+            "password": "123456",
+            "email": f"{username}@example.com",
+        },
+    )
+    assert register.json()["code"] == 0, register.text
+
+    login = client.post(
+        "/api/auth/login",
+        json={"username": username, "password": "123456"},
+    ).json()
+    assert login["code"] == 0, login
+    return {"Authorization": f"Bearer {login['data']['token']}"}
+
+
+@pytest.fixture(scope="module")
+def address_auth(client: TestClient) -> dict:
+    """收货地址流程测试用户。"""
+    return _register_and_login(client, "pytest_address")
+
+
+@pytest.fixture(scope="module")
+def other_auth(client: TestClient) -> dict:
+    """用于验证跨用户越权的另一个用户。"""
+    return _register_and_login(client, "pytest_address_other")
+
+
+def test_address_crud_and_default(client: TestClient, address_auth):
+    """首条自动默认、默认互斥、编辑与删除后默认提升。"""
+    headers = address_auth
+
+    empty = client.get("/api/addresses", headers=headers).json()
+    assert empty["code"] == 0
+    assert empty["data"] == []
+
+    first = client.post(
+        "/api/addresses",
+        json={
+            "receiver_name": "张三",
+            "phone": "13800001111",
+            "address": "北京市海淀区中关村大街 1 号",
+        },
+        headers=headers,
+    ).json()
+    assert first["code"] == 0, first
+    assert first["data"]["is_default"] is True
+    first_id = first["data"]["id"]
+
+    second = client.post(
+        "/api/addresses",
+        json={
+            "receiver_name": "李四",
+            "phone": "13900002222",
+            "address": "上海市浦东新区世纪大道 100 号",
+        },
+        headers=headers,
+    ).json()
+    assert second["code"] == 0, second
+    assert second["data"]["is_default"] is False
+    second_id = second["data"]["id"]
+
+    listing = client.get("/api/addresses", headers=headers).json()["data"]
+    assert [item["id"] for item in listing] == [first_id, second_id]
+    assert sum(1 for item in listing if item["is_default"]) == 1
+
+    switched = client.put(
+        f"/api/addresses/{second_id}",
+        json={"is_default": True},
+        headers=headers,
+    ).json()
+    assert switched["code"] == 0
+    assert switched["data"]["is_default"] is True
+
+    listing = client.get("/api/addresses", headers=headers).json()["data"]
+    assert [item["id"] for item in listing][0] == second_id
+    defaults = [item["id"] for item in listing if item["is_default"]]
+    assert defaults == [second_id]
+
+    edited = client.put(
+        f"/api/addresses/{first_id}",
+        json={"receiver_name": "张三丰"},
+        headers=headers,
+    ).json()
+    assert edited["code"] == 0
+    assert edited["data"]["receiver_name"] == "张三丰"
+    assert edited["data"]["address"] == "北京市海淀区中关村大街 1 号"
+
+    removed = client.delete(f"/api/addresses/{second_id}", headers=headers).json()
+    assert removed["code"] == 0
+
+    remained = client.get("/api/addresses", headers=headers).json()["data"]
+    assert len(remained) == 1
+    assert remained[0]["id"] == first_id
+    assert remained[0]["is_default"] is True
+
+    bad_phone = client.post(
+        "/api/addresses",
+        json={
+            "receiver_name": "王五",
+            "phone": "abc",
+            "address": "广州市天河区体育西路 8 号",
+        },
+        headers=headers,
+    ).json()
+    assert bad_phone["code"] == 422
+
+    blank_address = client.post(
+        "/api/addresses",
+        json={
+            "receiver_name": "王五",
+            "phone": "13700003333",
+            "address": "     ",
+        },
+        headers=headers,
+    ).json()
+    assert blank_address["code"] == 422
+
+
+def test_address_ownership_and_order_guard(
+    client: TestClient, address_auth, other_auth, admin
+):
+    """他人地址不可见、不可改；用他人地址下单失败且不改动库存与购物车。"""
+    owned = client.post(
+        "/api/addresses",
+        json={
+            "receiver_name": "归属测试",
+            "phone": "13600004444",
+            "address": "杭州市西湖区文三路 90 号",
+        },
+        headers=address_auth,
+    ).json()["data"]
+
+    other_list = client.get("/api/addresses", headers=other_auth).json()["data"]
+    assert other_list == []
+
+    updated = client.put(
+        f"/api/addresses/{owned['id']}",
+        json={"receiver_name": "越权修改"},
+        headers=other_auth,
+    ).json()
+    assert updated["code"] == 404
+
+    deleted = client.delete(
+        f"/api/addresses/{owned['id']}", headers=other_auth
+    ).json()
+    assert deleted["code"] == 404
+
+    product = _create_product(client, admin, "地址越权商品", 5, 20)
+    added = client.post(
+        "/api/cart",
+        json={"product_id": product["id"], "quantity": 1},
+        headers=other_auth,
+    ).json()
+    assert added["code"] == 0
+
+    blocked = client.post(
+        "/api/orders",
+        json={"address_id": owned["id"]},
+        headers=other_auth,
+    ).json()
+    assert blocked["code"] == 404
+
+    cart = client.get("/api/cart", headers=other_auth).json()["data"]
+    assert cart["total_quantity"] == 1
+
+    db = SessionLocal()
+    try:
+        stored = db.get(Product, product["id"])
+        assert stored.stock == 5
+        assert stored.sales == 0
+    finally:
+        db.close()
+
+
+def test_order_keeps_address_snapshot(client: TestClient, address_auth, admin):
+    """下单保存地址快照；之后编辑或删除地址都不影响历史订单。"""
+    snapshot = client.post(
+        "/api/addresses",
+        json={
+            "receiver_name": "快照收货人",
+            "phone": "13500005555",
+            "address": "南京市鼓楼区中山路 18 号",
+        },
+        headers=address_auth,
+    ).json()["data"]
+
+    product = _create_product(client, admin, "地址快照商品", 5, 25)
+    added = client.post(
+        "/api/cart",
+        json={"product_id": product["id"], "quantity": 2},
+        headers=address_auth,
+    ).json()
+    assert added["code"] == 0
+
+    order = client.post(
+        "/api/orders",
+        json={"address_id": snapshot["id"]},
+        headers=address_auth,
+    ).json()
+    assert order["code"] == 0, order
+    order_id = order["data"]["id"]
+    assert order["data"]["receiver_name"] == "快照收货人"
+    assert order["data"]["receiver_phone"] == "13500005555"
+    assert order["data"]["receiver_address"] == "南京市鼓楼区中山路 18 号"
+
+    client.put(
+        f"/api/addresses/{snapshot['id']}",
+        json={
+            "receiver_name": "已修改收货人",
+            "address": "苏州市工业园区星湖街 328 号",
+        },
+        headers=address_auth,
+    )
+    client.delete(f"/api/addresses/{snapshot['id']}", headers=address_auth)
+
+    orders = client.get("/api/orders", headers=address_auth).json()["data"]
+    kept = next(item for item in orders if item["id"] == order_id)
+    assert kept["receiver_name"] == "快照收货人"
+    assert kept["receiver_phone"] == "13500005555"
+    assert kept["receiver_address"] == "南京市鼓楼区中山路 18 号"
+
+    # 无请求体 / 空对象仍可下单，地址快照为空
+    client.post(
+        "/api/cart",
+        json={"product_id": product["id"], "quantity": 1},
+        headers=address_auth,
+    )
+    plain = client.post("/api/orders", json={}, headers=address_auth).json()
+    assert plain["code"] == 0, plain
+    assert plain["data"]["receiver_name"] is None

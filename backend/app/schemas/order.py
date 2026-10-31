@@ -2,7 +2,13 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class OrderCreateIn(BaseModel):
+    """下单请求：可选指定收货地址。"""
+
+    address_id: int | None = Field(default=None, gt=0)
 
 
 class OrderItemOut(BaseModel):
@@ -33,6 +39,9 @@ class OrderOut(BaseModel):
     shipped_at: datetime | None = None
     return_type: str | None = None
     return_reason: str | None = None
+    receiver_name: str | None = None
+    receiver_phone: str | None = None
+    receiver_address: str | None = None
     items: list[OrderItemOut]
 
 

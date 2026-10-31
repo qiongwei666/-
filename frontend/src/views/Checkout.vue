@@ -3,7 +3,7 @@
     <div class="page-head">
       <div>
         <h1 class="page-title">确认订单</h1>
-        <p class="page-subtitle">填写收货信息并确认商品清单，提交后将生成订单</p>
+        <p class="page-subtitle">选择收货地址并确认商品清单，提交后将生成订单</p>
       </div>
       <router-link to="/cart" class="back-link">返回购物车 →</router-link>
     </div>
@@ -19,62 +19,63 @@
     </section>
 
     <el-row v-else :gutter="16" class="checkout-layout">
-      <!-- 收货信息：仅前端展示与校验，不提交到后端 -->
+      <!-- 收货信息：从地址簿选择 -->
       <el-col :xs="24" :md="14">
         <section class="panel checkout-form-card">
-          <h2 class="block-title">收货信息</h2>
-          <el-alert
-            title="收货信息仅用于本次演示，不会提交到后端"
-            type="info"
-            :closable="false"
-            show-icon
-            class="checkout-alert"
-          />
+          <div class="address-head-row">
+            <h2 class="block-title">收货信息</h2>
+            <el-button link type="primary" @click="openAddressDialog">
+              <el-icon><Plus /></el-icon>
+              新增地址
+            </el-button>
+          </div>
 
-          <el-form
-            ref="formRef"
-            :model="form"
-            :rules="rules"
-            label-position="top"
-            size="large"
+          <div v-if="addressLoading" class="address-loading">
+            <el-skeleton :rows="3" animated />
+          </div>
+
+          <el-empty
+            v-else-if="!addresses.length"
+            description="还没有收货地址，请先新增"
+            :image-size="80"
+            class="address-empty"
           >
-            <el-form-item label="收货人" prop="receiver">
-              <el-input
-                v-model.trim="form.receiver"
-                placeholder="请输入收货人姓名"
-                clearable
-                maxlength="20"
-              >
-                <template #prefix>
-                  <el-icon><User /></el-icon>
-                </template>
-              </el-input>
-            </el-form-item>
+            <el-button type="primary" @click="openAddressDialog">
+              新增收货地址
+            </el-button>
+          </el-empty>
 
-            <el-form-item label="联系电话" prop="phone">
-              <el-input
-                v-model.trim="form.phone"
-                placeholder="请输入联系电话"
-                clearable
-                maxlength="20"
+          <template v-else>
+            <el-radio-group v-model="selectedAddressId" class="address-options">
+              <el-radio
+                v-for="item in addresses"
+                :key="item.id"
+                :value="item.id"
+                class="address-option"
               >
-                <template #prefix>
-                  <el-icon><Phone /></el-icon>
-                </template>
-              </el-input>
-            </el-form-item>
+                <span class="address-option-body">
+                  <span class="address-option-head">
+                    <span class="address-name">{{ item.receiver_name }}</span>
+                    <span class="address-phone">{{ item.phone }}</span>
+                    <el-tag
+                      v-if="item.is_default"
+                      size="small"
+                      type="success"
+                      effect="light"
+                      round
+                    >
+                      默认
+                    </el-tag>
+                  </span>
+                  <span class="address-text">{{ item.address }}</span>
+                </span>
+              </el-radio>
+            </el-radio-group>
 
-            <el-form-item label="收货地址" prop="address">
-              <el-input
-                v-model.trim="form.address"
-                type="textarea"
-                :rows="3"
-                placeholder="请输入详细收货地址"
-                maxlength="200"
-                show-word-limit
-              />
-            </el-form-item>
-          </el-form>
+            <router-link to="/addresses" class="manage-link">
+              管理收货地址 →
+            </router-link>
+          </template>
         </section>
       </el-col>
 
@@ -139,13 +140,21 @@
         </aside>
       </el-col>
     </el-row>
+
+    <AddressFormDialog
+      v-model="addressDialogVisible"
+      :address="editingAddress"
+      @saved="handleAddressSaved"
+    />
   </div>
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import AddressFormDialog from '@/components/AddressFormDialog.vue'
+import { getAddresses } from '@/api/address'
 import { createOrder } from '@/api/order'
 import { useCartStore } from '@/stores/cart'
 import { formatPrice } from '@/utils/format'
@@ -154,59 +163,63 @@ import { PLACEHOLDER_IMAGE, handleImageError } from '@/utils/image'
 const router = useRouter()
 const cartStore = useCartStore()
 
-const formRef = ref()
 const loading = ref(true)
 const submitting = ref(false)
 
-// 收货信息仅做前端展示与校验，不会提交给后端
-const form = reactive({
-  receiver: '',
-  phone: '',
-  address: ''
-})
+const addresses = ref([])
+const addressLoading = ref(true)
+const selectedAddressId = ref(null)
+const addressDialogVisible = ref(false)
+const editingAddress = ref(null)
 
-const rules = {
-  receiver: [
-    { required: true, message: '请输入收货人姓名', trigger: 'blur' },
-    { min: 2, max: 20, message: '收货人姓名长度需为 2-20 个字符', trigger: 'blur' }
-  ],
-  phone: [
-    { required: true, message: '请输入联系电话', trigger: 'blur' },
-    {
-      pattern: /^[0-9+\-\s]{6,20}$/,
-      message: '请输入正确的联系电话',
-      trigger: 'blur'
+/** 加载地址簿，默认选中默认地址 */
+async function loadAddresses() {
+  addressLoading.value = true
+  try {
+    const data = await getAddresses({ silent: true })
+    addresses.value = Array.isArray(data) ? data : []
+    if (!addresses.value.some((item) => item.id === selectedAddressId.value)) {
+      const fallback =
+        addresses.value.find((item) => item.is_default) || addresses.value[0]
+      selectedAddressId.value = fallback ? fallback.id : null
     }
-  ],
-  address: [
-    { required: true, message: '请输入收货地址', trigger: 'blur' },
-    { min: 5, max: 200, message: '收货地址长度需为 5-200 个字符', trigger: 'blur' }
-  ]
+  } catch (error) {
+    addresses.value = []
+    selectedAddressId.value = null
+  } finally {
+    addressLoading.value = false
+  }
 }
 
-/** 提交订单：无请求体，由后端从购物车结算 */
+function openAddressDialog() {
+  editingAddress.value = null
+  addressDialogVisible.value = true
+}
+
+async function handleAddressSaved(saved) {
+  await loadAddresses()
+  if (saved?.id) {
+    selectedAddressId.value = saved.id
+  }
+}
+
+/** 提交订单：带上选中的收货地址，由后端从购物车结算 */
 async function handleSubmit() {
-  // 立即上锁，防止表单校验期间重复点击产生重复订单
   if (submitting.value) {
     return
   }
-  submitting.value = true
-
-  try {
-    await formRef.value.validate()
-  } catch (error) {
-    submitting.value = false
-    return
-  }
-
   if (!cartStore.items.length) {
-    submitting.value = false
     ElMessage.warning('购物车为空，无法提交订单')
     return
   }
+  if (!selectedAddressId.value) {
+    ElMessage.warning('请选择收货地址')
+    return
+  }
 
+  submitting.value = true
   try {
-    await createOrder()
+    await createOrder(selectedAddressId.value)
     // 下单成功后清空本地购物车状态
     cartStore.reset()
     ElMessage.success('订单创建成功')
@@ -220,13 +233,10 @@ async function handleSubmit() {
 }
 
 onMounted(async () => {
-  if (cartStore.loaded) {
-    loading.value = false
-    cartStore.fetchCart({ silent: true })
-    return
-  }
-
-  await cartStore.fetchCart({ silent: false })
+  const cartRequest = cartStore.loaded
+    ? cartStore.fetchCart({ silent: true })
+    : cartStore.fetchCart({ silent: false })
+  await Promise.all([cartRequest, loadAddresses()])
   loading.value = false
 })
 </script>
@@ -261,13 +271,101 @@ onMounted(async () => {
   margin-bottom: 18px;
 }
 
-.checkout-alert {
-  margin-bottom: 20px;
+.address-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
 }
 
-.checkout-form-card :deep(.el-form-item__label) {
-  font-weight: 500;
+.address-head-row .block-title {
+  margin-bottom: 0;
+}
+
+.address-loading {
+  padding: 6px 0;
+}
+
+.address-empty {
+  padding: 8px 0 4px;
+}
+
+.address-options {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.address-option {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  height: auto;
+  margin-right: 0;
+  padding: 14px 16px;
+  border: 1px solid #e5e5ea;
+  border-radius: 14px;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+.address-option:hover {
+  border-color: #c7c7cc;
+}
+
+.address-option.is-checked {
+  border-color: #0071e3;
+  background: #f5f9ff;
+}
+
+.address-option :deep(.el-radio__label) {
+  flex: 1;
+  min-width: 0;
+  padding-left: 10px;
+}
+
+.address-option-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.address-option-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.address-name {
+  color: #1d1d1f;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.address-phone {
   color: #6e6e73;
+  font-size: 13px;
+}
+
+.address-text {
+  color: #86868b;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: normal;
+  word-break: break-all;
+}
+
+.manage-link {
+  display: inline-block;
+  margin-top: 16px;
+  color: #06c;
+  font-size: 13px;
+}
+
+.manage-link:hover {
+  text-decoration: underline;
 }
 
 .order-summary {

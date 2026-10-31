@@ -15,6 +15,7 @@
 - 我的订单列表与订单明细，展示快递单号与退换货信息
 - 订单状态流转：`paid → shipped → completed`，用户可确认收货
 - 退货 / 换货申请与管理员审批：退款自动回补库存，换货为状态流转
+- 多收货地址管理（新增 / 编辑 / 删除 / 默认地址），结算时选择地址，订单保存收货地址快照
 - 管理员后台：商品新增 / 编辑 / 上下架（图片填 URL），订单发货与退换货审批
 - 用户行为采集：`view / click / cart / buy`，后端映射权重 `1 / 2 / 3 / 5`
 - 点击商品卡片上报 `click`，进入详情页上报 `view`
@@ -70,13 +71,15 @@ ecommerce-rec/
 │   │   ├── config.py           # Pydantic Settings
 │   │   ├── database.py         # Engine / Session / 建库建表
 │   │   ├── redis_client.py     # 懒加载 Redis 客户端
-│   │   ├── models/             # 7 张 ORM 表
+│   │   ├── models/             # 8 张 ORM 表
 │   │   ├── schemas/            # Pydantic v2 Schema
-│   │   ├── routers/            # 8 组 API（含 /admin 管理后台）
+│   │   ├── routers/            # 9 组 API（含 /addresses 与 /admin）
 │   │   ├── services/           # 认证 / 商品 / 订单 / 管理后台 / 推荐业务
 │   │   ├── utils/              # JWT、bcrypt、依赖、统一响应
 │   │   ├── static/swagger-ui/  # 自托管 Swagger UI（离线可用）
-│   │   └── data/seed.py        # 300 用户 / 198 商品 / 2.2w+ 行为
+│   │   └── data/
+│   │       ├── seed.py         # 演示数据：300 用户 / 198 商品 / 2.2w+ 行为
+│   │       └── migrate.py      # 非破坏性表结构增量同步
 │   └── tests/test_api.py       # 主流程 + 降级集成测试
 ├── recommender/
 │   ├── config.py               # 与 backend/.env 共用配置
@@ -100,15 +103,18 @@ ecommerce-rec/
 | `category` | id, name, parent_id | 二级分类树 |
 | `product` | id, name, description, price, stock, category_id, sales, image_url, **status** | 商品，`status` 为 `on_sale / off_sale` |
 | `cart_item` | id, user_id, product_id, quantity | 唯一约束 `(user_id, product_id)` |
-| `order` | id, user_id, total_amount, status, **tracking_no, shipped_at, return_type, return_reason**, created_at | 订单，默认 `paid` |
+| `address` | id, user_id, receiver_name, phone, address, is_default, created_at | 收货地址，每人多条，默认地址互斥 |
+| `order` | id, user_id, total_amount, status, **tracking_no, shipped_at, return_type, return_reason, receiver_name, receiver_phone, receiver_address**, created_at | 订单，默认 `paid`，保存收货地址快照 |
 | `order_item` | id, order_id, product_id, quantity, price | 成交价快照 |
 | `user_behavior` | id, user_id, product_id, behavior_type, weight, created_at | 推荐数据源 |
 
 `user_behavior` 建立 `idx_user_time(user_id, created_at)` 与 `idx_product(product_id)` 索引。
 
+> 新增 `address` 表与订单收货地址快照字段后**不需要重跑 seed**：服务启动时会自动增量同步表结构（只补建缺失的表、列和索引），已有用户、订单和行为数据都会保留。
+
 订单状态机（仅允许以下流转）：`paid` –发货→ `shipped` –确认收货→ `completed` –申请退换→ `return_pending` –审批→ `refunded / exchanged / return_rejected`。
 
-> 本次新增 `user.role`、`product.status` 与订单物流 / 退换字段。项目没有 Alembic，已有数据库必须重新执行 `python -m app.data.seed`（会重建表）。
+> 新增 `user.role`、`product.status` 与订单物流 / 退换字段同样由启动时的增量同步自动补齐，无需重跑 seed。
 
 ### 4.2 Redis 键
 
@@ -214,13 +220,14 @@ py -3.13 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python --version   # 应为 Python 3.13.x
 pip install -r requirements.txt
-python -m app.data.seed
+python -m app.data.seed   # 仅首次部署生成演示数据（会清空并重建业务表）
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 - Swagger 文档：<http://127.0.0.1:8000/docs>（本地静态资源，离线可用）
 - 健康检查：<http://127.0.0.1:8000/api/health>（返回 database / redis / **python_version**）
-- seed 会重建业务表并打印：用户 300、商品 198、行为 22458。
+- 首次执行 seed 会打印：用户 300、商品 198、行为 22458。
+- 之后更新代码**不要再执行 seed**：启动服务会自动增量同步表结构；也可手动运行 `python -m app.data.migrate`，只补建缺失的表 / 列 / 索引，不删除已有数据。
 - 演示账号（密码均为 `123456`）：
   - **admin / 123456**：管理员，可进入管理后台；
   - **demo / 123456**：普通用户，用于演示推荐与下单流程。
@@ -290,10 +297,14 @@ pytest -q
 | POST | `/api/cart` | 是 | 加购 |
 | PUT | `/api/cart/{id}` | 是 | 改数量 |
 | DELETE | `/api/cart/{id}` | 是 | 删除 |
-| POST | `/api/orders` | 是 | 从购物车结算 |
-| GET | `/api/orders` | 是 | 我的订单 |
+| POST | `/api/orders` | 是 | 从购物车结算，可选请求体 `{"address_id": n}` |
+| GET | `/api/orders` | 是 | 我的订单（含收货地址快照） |
 | POST | `/api/orders/{id}/confirm` | 是 | 确认收货 |
 | POST | `/api/orders/{id}/return` | 是 | 申请退货 / 换货 |
+| GET | `/api/addresses` | 是 | 我的收货地址（默认地址在前） |
+| POST | `/api/addresses` | 是 | 新增收货地址 |
+| PUT | `/api/addresses/{id}` | 是 | 编辑地址 / 设为默认 |
+| DELETE | `/api/addresses/{id}` | 是 | 删除收货地址 |
 | GET | `/api/admin/products` | 管理员 | 后台商品分页（含下架） |
 | POST | `/api/admin/products` | 管理员 | 新增商品（图片填 URL） |
 | PUT | `/api/admin/products/{id}` | 管理员 | 编辑商品 |
@@ -383,6 +394,7 @@ ALS 的 Precision@10 约为随机基线的 **6.6 倍**，证明用户-商品隐�
 - ALS 将“行为权重求和”作为隐式反馈置信度，未做实时增量训练；新行为由 15 分钟 TTL 的共访缓存提供短期实时补充，长期偏好仍在下次离线训练后生效。
 - 推荐结果未做多样性重排、曝光去重和线上 A/B 实验。
 - 支付为模拟流程，下单即 `paid`；发货与退换货为演示级状态流转：退款回补库存并扣减销量，换货仅改状态（不生成换货新单、不补发库存）；没有真实支付回调、优惠券与分布式库存锁。
+- 收货地址为纯文本输入，未做省市区级联、地址校验服务与地图选点。
 - 商品图使用京东 / 苏宁 / 阿里 CDN 外链，网络不可用时会显示前端内置占位图。
 - 评估采用离线时间切分，只反映历史数据上的排序效果，不等同于线上收益。
 
@@ -399,10 +411,13 @@ ALS 的 Precision@10 约为随机基线的 **6.6 倍**，证明用户-商品隐�
 **Q3：PySpark 报 Java 版本错误？**  
 安装 JDK 17+。`recommender/config.py` 会自动探测 Java 17/21；也可手动设置 `$env:JAVA_HOME` 指向 JDK 根目录。
 
-**Q4：seed 能重复执行吗？**  
-可以，但会清空并重建 7 张业务表。不要对重要数据库执行。
+**Q4：更新代码后之前注册的用户怎么保住？**  
+不需要执行 seed。服务启动时会自动运行增量同步（`backend/app/data/migrate.py`），只补建缺失的表 / 列 / 索引，已有用户、订单、购物车和行为数据全部保留。也可以手动运行 `python -m app.data.migrate`。
 
-**Q5：训练后推荐结果没变化？**  
+**Q5：seed 能重复执行吗？**  
+可以，但会清空并重建全部业务表，仅用于首次部署或重置演示数据。不要对重要数据库执行。
+
+**Q6：训练后推荐结果没变化？**  
 确认 Redis 与后端使用同一个 `REDIS_URL`，并检查 `redis-cli keys "rec:user:*"` 是否有数据；浏览器刷新后重新进入首页。
 
 ---
@@ -412,7 +427,7 @@ ALS 的 Precision@10 约为随机基线的 **6.6 倍**，证明用户-商品隐�
 | # | 验收项 | 结果 |
 | --- | --- | --- |
 | 1 | MySQL / Redis 可用 | 本机 MySQL 8.0.26 + Redis 5.0.14（兼容 Redis 7 指令）运行正常；`docker-compose.yml` 已通过 YAML 解析与密码一致性检查。当前开发机未安装 Docker Desktop，故运行验证使用本机中间件，Compose 启动方式已写入 README。 |
-| 2 | `/docs` 可访问 | 200；Swagger UI 静态资源已本地化，23 个 OpenAPI 路径全部可见（含 7 个管理端接口）。 |
+| 2 | `/docs` 可访问 | 200；Swagger UI 静态资源已本地化，25 个 OpenAPI 路径全部可见（含 7 个管理端接口与 2 个地址路径）。 |
 | 3 | seed 数据量 | 用户 300（含 `admin`）、商品 198、一级分类 10 / 子分类 50、行为 22,458 条；商品图片 198 张互不重复，演示过程中会继续累积真实浏览行为。 |
 | 4 | 主流程 | 在本机 MySQL 上实测注册 → 登录 → 浏览 → 加购 → 下单 → 订单查询成功，测试后已清理临时用户并恢复库存。 |
 | 5 | 行为权重 | 实测 view=1、click=2、cart=3、buy=5；下单由后端自动写入 buy。 |
@@ -421,5 +436,6 @@ ALS 的 Precision@10 约为随机基线的 **6.6 倍**，证明用户-商品隐�
 | 8 | 看了又看 | 策略 `hybrid`（ALS + 真实共访）；首屏 8 条，滚动后 8 → 16 → 24，无重复，末尾显示“已经到底了”。 |
 | 9 | 离线评估 | 三组指标齐全，`evaluation_result.md` 自动生成。 |
 | 10 | Redis 故障降级 | 指向不可达 Redis 时，匿名首页约 0.28s 返回 `hot`，登录用户首页返回 `behavior`，相似商品约 0.04s 返回 `coview`，始终 `code=0`（已加 3s 熔断，避免连续尝试 Redis）。 |
-| 11 | 测试与构建 | Python **3.13.5** 下 `pytest -q`：9 passed；`npm run build`：成功，1719 modules transformed。 |
+| 11 | 测试与构建 | Python **3.13.5** 下 `pytest -q`：12 passed；`npm run build`：成功，1723 modules transformed。 |
 | 12 | 管理员流程 | `admin` 登录返回 `role=admin`，`demo` 访问 `/api/admin/products` 返回 `code=403`，前端访问 `/admin/products` 被重定向回首页；管理员新增商品 → 下架后前台列表不含、详情 404、加购 400，后台仍可见；发货（带单号）→ 确认收货 → 申请退款 → 同意退款后库存恢复、销量回落，重复审批返回 400。 |
+| 13 | 收货地址 | demo 预置 2 条地址且仅 1 条默认；地址簿可新增 / 编辑 / 删除 / 设为默认，删除默认地址后自动提升剩余地址；结算页默认选中默认地址、可切换地址并下单；订单保存地址快照，编辑或删除地址后历史订单不变；跨用户操作地址与使用他人 `address_id` 下单均返回 404。 |

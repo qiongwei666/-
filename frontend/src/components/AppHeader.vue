@@ -47,6 +47,10 @@
                 <el-icon><Tickets /></el-icon>
                 <span>我的订单</span>
               </el-dropdown-item>
+              <el-dropdown-item command="addresses">
+                <el-icon><Location /></el-icon>
+                <span>收货地址</span>
+              </el-dropdown-item>
               <el-dropdown-item v-if="userStore.isAdmin" command="admin-products">
                 <el-icon><Goods /></el-icon>
                 <span>商品管理</span>
@@ -89,6 +93,11 @@ const cartStore = useCartStore()
 function handleCommand(command) {
   if (command === 'orders') {
     router.push('/orders')
+    return
+  }
+
+  if (command === 'addresses') {
+    router.push('/addresses')
     return
   }
 

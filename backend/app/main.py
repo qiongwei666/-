@@ -19,9 +19,11 @@ from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import settings
-from app.database import SessionLocal, init_db
+from app.data.migrate import sync_schema
+from app.database import SessionLocal
 from app.redis_client import close_redis, is_redis_available
 from app.routers import (
+    address,
     admin,
     auth,
     behavior,
@@ -47,8 +49,10 @@ SWAGGER_DIR = STATIC_DIR / "swagger-ui"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    """应用启动时确保表结构存在，退出时释放 Redis 连接。"""
-    init_db()
+    """启动时增量同步表结构（不删数据），退出时释放 Redis 连接。"""
+    changes = sync_schema()
+    if changes:
+        logger.info("数据库结构已自动同步：%s", "；".join(changes))
     logger.info("应用启动完成，Swagger: /docs")
     try:
         yield
@@ -187,6 +191,7 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(category.router, prefix="/api")
 app.include_router(product.router, prefix="/api")
 app.include_router(cart.router, prefix="/api")
+app.include_router(address.router, prefix="/api")
 app.include_router(order.router, prefix="/api")
 app.include_router(behavior.router, prefix="/api")
 app.include_router(recommend.router, prefix="/api")
